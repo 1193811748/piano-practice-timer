@@ -72,11 +72,11 @@
                 <!-- 控制按钮 -->
                 <div class="controls">
                     <button id="startBtn" class="btn btn-success">▶ 开始练习</button>
-
                     <button id="pauseBtn" class="btn btn-warning" disabled>⏸ 暂停</button>
                     <button id="resetBtn" class="btn btn-danger" disabled>⏹ 重置</button>
+                    <button id="nextStageBtn" class="btn btn-primary" disabled>➡️ 下一阶段</button>
                 </div>
-                <!-- 手动切换模式按钮（默认隐藏） -->
+                <!-- 手动模式提示（倒计时结束后显示） -->
                 <div id="manualControls" class="manual-controls" style="display: none;">
                     <p class="manual-hint">当前阶段已完成，请选择操作：</p>
                     <div class="manual-buttons">
@@ -86,6 +86,7 @@
                     </div>
                 </div>
             </div>
+
         </section>
 
 
@@ -117,6 +118,12 @@
                 <div class="volume-bar" id="volumeBar"></div>
             </div>
 
+            <!-- 环境噪音校准 -->
+            <div class="focus-controls">
+                <button id="calibrateBtn" class="btn btn-secondary">🔇 环境噪音校准</button>
+                <span class="mic-status" id="calibrateStatus">未校准</span>
+            </div>
+
             <!-- 实时检测数据 -->
             <div class="focus-data-grid">
                 <div class="focus-data-item">
@@ -126,6 +133,10 @@
                 <div class="focus-data-item">
                     <span class="focus-data-label">钢琴频段占比</span>
                     <span class="focus-data-value" id="focusPianoRatio">--%</span>
+                </div>
+                <div class="focus-data-item">
+                    <span class="focus-data-label">频谱峰值数</span>
+                    <span class="focus-data-value" id="focusPeakCount">--</span>
                 </div>
                 <div class="focus-data-item">
                     <span class="focus-data-label">检测模式</span>
@@ -165,6 +176,14 @@
                         <input type="number" id="settingRatioThreshold" value="45" min="10" max="90" step="1">
                     </div>
                     <div class="setting-item">
+                        <label>频谱峰值数量阈值</label>
+                        <input type="number" id="settingPeakThreshold" value="3" min="1" max="20" step="1">
+                    </div>
+                    <div class="setting-item">
+                        <label>持续检测时间（秒）</label>
+                        <input type="number" id="settingHoldTime" value="1" min="0.5" max="5" step="0.5">
+                    </div>
+                    <div class="setting-item">
                         <label>静音提醒时间（秒）</label>
                         <input type="number" id="settingSilentTimeout" value="20" min="5" max="120" step="1">
                     </div>
@@ -173,8 +192,57 @@
 
             <!-- 说明文字 -->
             <p class="focus-disclaimer">
-                ⚠️ 本功能基于音量阈值和频谱能量分布进行判断，可减少部分环境噪音误判，但不等同于专业钢琴声音识别模型。实际结果可能受麦克风质量、环境噪音和设备差异影响。
+                ⚠️ 本功能基于音量阈值、钢琴频段能量和频谱峰值进行判断，可减少部分环境噪音误判，但不等同于专业钢琴声音识别模型。实际效果会受到麦克风质量、环境噪音、设备距离和演奏音量影响。
             </p>
+        </section>
+
+
+        <!-- 节拍器区域 -->
+        <section class="metronome-section">
+            <h2>🥁 节拍器</h2>
+
+            <!-- 节拍器控制 -->
+            <div class="metronome-controls">
+                <div class="metronome-row">
+                    <div class="metronome-item">
+                        <label>BPM</label>
+                        <input type="number" id="metronomeBpm" value="80" min="20" max="300" step="1">
+                    </div>
+                    <div class="metronome-item">
+                        <label>拍号</label>
+                        <select id="metronomeTimeSig">
+                            <option value="2/4">2/4</option>
+                            <option value="3/4">3/4</option>
+                            <option value="4/4" selected>4/4</option>
+                            <option value="6/8">6/8</option>
+                        </select>
+                    </div>
+                    <div class="metronome-item">
+                        <label>&nbsp;</label>
+                        <button id="metronomeToggleBtn" class="btn btn-secondary">▶ 开启节拍器</button>
+                    </div>
+                </div>
+                <div class="metronome-row">
+                    <label class="switch-option">
+                        <input type="checkbox" id="metronomeAutoToggle">
+                        <span>练习阶段自动开启节拍器</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- 节拍视觉反馈 -->
+            <div class="metronome-visual" id="metronomeVisual">
+                <div class="beat-indicators" id="beatIndicators">
+                    <div class="beat-dot" data-beat="1">1</div>
+                    <div class="beat-dot" data-beat="2">2</div>
+                    <div class="beat-dot" data-beat="3">3</div>
+                    <div class="beat-dot" data-beat="4">4</div>
+                </div>
+                <div class="beat-info">
+                    <span id="beatDisplay">--</span>
+                    <span class="beat-bpm" id="bpmDisplay">-- BPM</span>
+                </div>
+            </div>
         </section>
 
 
@@ -192,18 +260,28 @@
             <div class="summary-stats">
                 <div class="summary-item">
                     <span class="summary-icon">⏱️</span>
-                    <span class="summary-label">总练习时长</span>
+                    <span class="summary-label">实际练习时长</span>
                     <span class="summary-value" id="summaryTotalTime">0 分钟</span>
                 </div>
                 <div class="summary-item">
                     <span class="summary-icon">📋</span>
                     <span class="summary-label">完成阶段数</span>
-                    <span class="summary-value" id="summaryStageCount">0</span>
+                    <span class="summary-value" id="summaryStageCount">0 / 0</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-icon">⏩</span>
+                    <span class="summary-label">提前切换次数</span>
+                    <span class="summary-value" id="summarySkipCount">0</span>
                 </div>
                 <div class="summary-item">
                     <span class="summary-icon">🎤</span>
                     <span class="summary-label">专注提醒次数</span>
                     <span class="summary-value" id="summaryFocusCount">0</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-icon">🥁</span>
+                    <span class="summary-label">节拍器使用</span>
+                    <span class="summary-value" id="summaryMetronomeUsed">否</span>
                 </div>
                 <div class="summary-item">
                     <span class="summary-icon">🏆</span>
