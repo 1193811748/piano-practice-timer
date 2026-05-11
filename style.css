@@ -175,6 +175,15 @@ h2 {
     transform: translateY(-1px);
 }
 
+.btn-gold {
+    background: #c9a03a;
+    color: #0a0a0a;
+}
+.btn-gold:hover:not(:disabled) {
+    background: #b8922e;
+    transform: translateY(-1px);
+}
+
 .btn-secondary {
     background: rgba(255, 255, 255, 0.1);
     color: #e0e0e0;

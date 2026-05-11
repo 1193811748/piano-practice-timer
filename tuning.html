@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>调律拍频计算器</title>
+    <!-- Vue 3 CDN -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <!-- CDN 加载失败检测 -->
+    <script>
+        // 检测 Vue 是否加载成功
+        document.querySelector('script[src*="vue"]').addEventListener('error', function() {
+            document.getElementById('app').innerHTML =
+                '<div style="text-align:center;padding:40px 20px;color:#e74c3c;">' +
+                '<h2>⚠️ 页面加载失败</h2>' +
+                '<p style="margin-top:12px;color:#8899aa;">Vue.js CDN 加载失败，请检查网络连接后刷新页面。</p>' +
+                '<p style="margin-top:8px;color:#667788;font-size:0.85rem;">如果使用 GitHub Pages，CDN 通常可以正常加载。</p>' +
+                '<button onclick="location.reload()" style="margin-top:16px;padding:10px 24px;background:#c9a03a;color:#0a0a0a;border:none;border-radius:8px;cursor:pointer;">🔄 刷新页面</button>' +
+                '</div>';
+        });
+        // 标记 Chart.js 加载失败
+        document.querySelector('script[src*="chart.js"]').addEventListener('error', function() {
+            window.__chartFailed = true;
+        });
+    </script>
+    <style>
+        /* ===== 全局重置 ===== */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+            background: #0a0a0a;
+            min-height: 100vh;
+            color: #e0e0e0;
+            line-height: 1.6;
+            padding: 16px;
+        }
+        .container {
+            max-width: 460px;
+            margin: 0 auto;
+        }
+
+        /* ===== 页头 ===== */
+        header {
+            text-align: center;
+            margin-bottom: 24px;
+            padding: 24px 0 16px;
+        }
+        header h1 {
+            font-size: 1.6rem;
+            color: #c9a03a;
+            margin-bottom: 6px;
+        }
+        .subtitle {
+            font-size: 0.85rem;
+            color: #8899aa;
+        }
+
+        /* ===== 卡片 ===== */
+        .card {
+            background: rgba(255,255,255,0.06);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 14px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+        .card h2 {
+            font-size: 1rem;
+            color: #c9a03a;
+            margin-bottom: 14px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+
+        /* ===== 说明文字 ===== */
+        .desc-text {
+            font-size: 0.82rem;
+            color: #8899aa;
+            line-height: 1.7;
+            margin-bottom: 8px;
+        }
+        .desc-text strong { color: #c9a03a; }
+
+        /* ===== 表单 ===== */
+        .form-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .form-group {
+            flex: 1;
+            min-width: 100px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 0.75rem;
+            color: #8899aa;
+            margin-bottom: 3px;
+        }
+        .form-group select, .form-group input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 8px;
+            background: rgba(255,255,255,0.08);
+            color: #e0e0e0;
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.2s;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        .form-group select:focus, .form-group input:focus {
+            border-color: #c9a03a;
+        }
+        .form-group select option { background: #1a1a1a; color: #e0e0e0; }
+
+        /* ===== A4 基准频率 ===== */
+        .a4-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .a4-row input[type="range"] {
+            flex: 1;
+            min-width: 120px;
+            accent-color: #c9a03a;
+            height: 6px;
+        }
+        .a4-value {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #c9a03a;
+            min-width: 60px;
+            text-align: center;
+        }
+
+        /* ===== 快捷按钮 ===== */
+        .preset-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+        .preset-btn {
+            padding: 10px 6px;
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 8px;
+            background: rgba(255,255,255,0.04);
+            color: #e0e0e0;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-align: center;
+        }
+        .preset-btn:active { transform: scale(0.95); }
+        .preset-btn:hover { background: rgba(255,255,255,0.1); }
+        .preset-btn.active {
+            background: rgba(201,160,58,0.2);
+            border-color: #c9a03a;
+            color: #c9a03a;
+        }
+
+        /* ===== 结果卡片 ===== */
+        .result-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .result-item {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: 12px;
+            text-align: center;
+        }
+        .result-item.full-width {
+            grid-column: 1 / -1;
+        }
+        .result-label {
+            display: block;
+            font-size: 0.75rem;
+            color: #8899aa;
+            margin-bottom: 4px;
+        }
+        .result-value {
+            display: block;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #c9a03a;
+        }
+        .result-value.zero-beat { color: #27ae60; }
+
+        /* ===== 播放控制 ===== */
+        .play-controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .play-controls .btn { flex: 1; min-width: 80px; }
+        .play-status {
+            font-size: 0.8rem;
+            color: #8899aa;
+            padding: 6px 10px;
+            background: rgba(255,255,255,0.04);
+            border-radius: 6px;
+            text-align: center;
+            width: 100%;
+        }
+        .play-status.playing { color: #27ae60; }
+
+        /* ===== 音量滑块 ===== */
+        .volume-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .volume-row label { font-size: 0.8rem; color: #8899aa; }
+        .volume-row input[type="range"] {
+            flex: 1;
+            accent-color: #c9a03a;
+            height: 5px;
+        }
+        .volume-row .vol-value {
+            font-size: 0.85rem;
+            color: #c9a03a;
+            min-width: 40px;
+            text-align: right;
+        }
+
+        /* ===== 按钮通用 ===== */
+        .btn {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-weight: 500;
+            text-align: center;
+        }
+        .btn:active { transform: scale(0.95); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+        .btn-gold {
+            background: #c9a03a;
+            color: #0a0a0a;
+        }
+        .btn-gold:hover:not(:disabled) { background: #b8922e; }
+        .btn-secondary {
+            background: rgba(255,255,255,0.1);
+            color: #e0e0e0;
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+        .btn-secondary:hover:not(:disabled) { background: rgba(255,255,255,0.18); }
+        .btn-danger {
+            background: #c0392b;
+            color: #fff;
+        }
+        .btn-danger:hover:not(:disabled) { background: #a93226; }
+        .btn-back {
+            background: transparent;
+            color: #8899aa;
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 10px 16px;
+            font-size: 0.85rem;
+        }
+        .btn-back:hover { color: #c9a03a; border-color: #c9a03a; }
+
+        /* ===== 图表容器 ===== */
+        .chart-container {
+            position: relative;
+            width: 100%;
+            height: 200px;
+            margin-top: 8px;
+        }
+        .chart-hint {
+            font-size: 0.75rem;
+            color: #667788;
+            text-align: center;
+            margin-top: 8px;
+        }
+
+        /* ===== 返回按钮 ===== */
+        .back-row {
+            text-align: center;
+            margin-top: 8px;
+            margin-bottom: 24px;
+        }
+
+        /* ===== 响应式 ===== */
+        @media (max-width: 400px) {
+            .preset-grid { grid-template-columns: repeat(2, 1fr); }
+            .result-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container" id="app">
+        <!-- 返回首页 -->
+        <div class="back-row">
+            <a href="index.html" class="btn btn-back">← 返回练琴计时器</a>
+        </div>
+
+        <!-- 页头 -->
+        <header>
+            <h1>🎹 调律拍频计算器</h1>
+            <p class="subtitle">学习调律中的拍频概念</p>
+        </header>
+
+        <!-- 说明文字 -->
+        <div class="card">
+            <p class="desc-text">
+                钢琴调律中的<strong>拍频</strong>来自两个接近频率的声音同时出现时产生的强弱起伏。调律师常通过比较不同泛音之间的拍频，判断音程是否合适。本工具根据十二平均律频率和常见调律音程的泛音对，计算理论拍频并提供声音示例。
+            </p>
+            <p class="desc-text" style="font-size:0.75rem; color:#667788; margin-top:6px;">
+                ⚠️ 本工具用于学习和演示调律中的拍频概念，计算结果基于十二平均律和理论泛音关系，不等同于专业调律师在真实钢琴上考虑琴弦非谐性后的完整调律结果。
+            </p>
+        </div>
+
+        <!-- 输入区域 -->
+        <div class="card">
+            <h2>🎯 选择音高</h2>
+
+            <!-- 音 1 -->
+            <div class="form-row">
+                <div class="form-group">
+                    <label>音 1 音名</label>
+                    <select v-model="note1.semitone">
+                        <option v-for="n in semitones" :key="n.value" :value="n.value">{{ n.label }}</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>八度</label>
+                    <select v-model="note1.octave">
+                        <option v-for="o in 9" :key="o-1" :value="o-1">{{ o-1 }}</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- 音 2 -->
+            <div class="form-row">
+                <div class="form-group">
+                    <label>音 2 音名</label>
+                    <select v-model="note2.semitone">
+                        <option v-for="n in semitones" :key="n.value" :value="n.value">{{ n.label }}</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>八度</label>
+                    <select v-model="note2.octave">
+                        <option v-for="o in 9" :key="o-1" :value="o-1">{{ o-1 }}</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- A4 基准频率 -->
+            <div style="margin-top:12px;">
+                <label style="font-size:0.8rem; color:#8899aa; display:block; margin-bottom:6px;">A4 基准频率</label>
+                <div class="a4-row">
+                    <input type="range" v-model.number="a4Freq" min="415" max="466" step="0.5">
+                    <span class="a4-value">{{ a4Freq.toFixed(1) }} Hz</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 快捷音程 -->
+        <div class="card">
+            <h2>⚡ 快捷音程</h2>
+            <div class="preset-grid">
+                <button v-for="p in presets" :key="p.name"
+                    class="preset-btn"
+                    :class="{ active: activePreset === p.name }"
+                    @click="applyPreset(p)">
+                    {{ p.name }}
+                </button>
+            </div>
+        </div>
+
+        <!-- 计算结果 -->
+        <div class="card">
+            <h2>📊 计算结果</h2>
+            <div class="result-grid">
+                <div class="result-item">
+                    <span class="result-label">音 1 频率</span>
+                    <span class="result-value">{{ freq1.toFixed(2) }} Hz</span>
+                </div>
+                <div class="result-item">
+                    <span class="result-label">音 2 频率</span>
+                    <span class="result-value">{{ freq2.toFixed(2) }} Hz</span>
+                </div>
+                <div class="result-item full-width">
+                    <span class="result-label">理论拍频</span>
+                    <span class="result-value" :class="{ 'zero-beat': beatRate < 0.01 }">
+                        {{ beatRate < 0.01 ? '接近无拍' : beatRate.toFixed(2) + ' Hz' }}
+                    </span>
+                </div>
+                <div class="result-item full-width">
+                    <span class="result-label">当前音程</span>
+                    <span class="result-value" style="font-size:0.9rem;">{{ intervalDesc }}</span>
+                </div>
+                <div class="result-item full-width">
+                    <span class="result-label">泛音计算方式</span>
+                    <span class="result-value" style="font-size:0.85rem; color:#8899aa;">{{ overtoneDesc }}</span>
+                </div>
+                <div class="result-item full-width" v-if="autoSwapped">
+                    <span class="result-label">自动调整</span>
+                    <span class="result-value" style="font-size:0.8rem; color:#27ae60;">系统已自动将较低音作为下方音进行泛音计算</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 播放控制 -->
+        <div class="card">
+            <h2>🔊 播放拍音</h2>
+            <div class="play-controls">
+                <button class="btn btn-gold" @click="playBeats" :disabled="isPlaying">▶ 播放拍音</button>
+                <button class="btn btn-danger" @click="stopBeats" :disabled="!isPlaying">⏹ 停止</button>
+            </div>
+            <div class="volume-row">
+                <label>音量</label>
+                <input type="range" v-model.number="playVolume" min="0" max="0.3" step="0.01">
+                <span class="vol-value">{{ playVolume.toFixed(2) }}</span>
+            </div>
+            <div class="play-status" :class="{ playing: isPlaying }">
+                {{ isPlaying ? '🎵 正在播放：' + playingFreq1.toFixed(2) + ' Hz 与 ' + playingFreq2.toFixed(2) + ' Hz' : '⏸ 未播放' }}
+            </div>
+        </div>
+
+        <!-- 图表 -->
+        <div class="card">
+            <h2>📈 拍音波形示意</h2>
+            <div class="chart-container">
+                <canvas id="beatChart"></canvas>
+            </div>
+            <p class="chart-hint">图表为两个泛音频率叠加后的模拟示意，用于帮助理解拍频快慢。</p>
+        </div>
+
+        <!-- 底部返回 -->
+        <div class="back-row">
+            <a href="index.html" class="btn btn-back">← 返回练琴计时器</a>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, watch, onMounted, onUnmounted } = Vue;
+
+        // 音名列表
+        const semitones = [
+            { value: 0, label: 'C' },
+            { value: 1, label: 'C# / Db' },
+            { value: 2, label: 'D' },
+            { value: 3, label: 'D# / Eb' },
+            { value: 4, label: 'E' },
+            { value: 5, label: 'F' },
+            { value: 6, label: 'F# / Gb' },
+            { value: 7, label: 'G' },
+            { value: 8, label: 'G# / Ab' },
+            { value: 9, label: 'A' },
+            { value: 10, label: 'A# / Bb' },
+            { value: 11, label: 'B' }
+        ];
+
+        // 快捷预置
+        const presets = [
+            { name: '同度', n1: { semitone: 0, octave: 4 }, n2: { semitone: 0, octave: 4 }, interval: 'unison' },
+            { name: '纯八度', n1: { semitone: 0, octave: 4 }, n2: { semitone: 0, octave: 5 }, interval: 'octave' },
+            { name: '纯五度', n1: { semitone: 0, octave: 4 }, n2: { semitone: 7, octave: 4 }, interval: 'fifth' },
+            { name: '纯四度', n1: { semitone: 0, octave: 4 }, n2: { semitone: 5, octave: 4 }, interval: 'fourth' },
+            { name: '大三度', n1: { semitone: 0, octave: 4 }, n2: { semitone: 4, octave: 4 }, interval: 'majorThird' },
+            { name: '大六度', n1: { semitone: 0, octave: 4 }, n2: { semitone: 9, octave: 4 }, interval: 'majorSixth' }
+        ];
+
+        // 音程对应的泛音规则
+        function getIntervalRule(intervalName, lowerFreq, upperFreq) {
+            switch (intervalName) {
+                case 'unison':
+                    return { mult1: 1, mult2: 1, desc: '同度调律时，目标是让拍频接近 0。计算方式：音1基频 vs 音2基频。' };
+                case 'octave':
+                    return { mult1: 2, mult2: 1, desc: '计算方式：下方音第 2 泛音 vs 上方音基频。' };
+                case 'fifth':
+                    return { mult1: 3, mult2: 2, desc: '计算方式：下方音第 3 泛音 vs 上方音第 2 泛音。' };
+                case 'fourth':
+                    return { mult1: 4, mult2: 3, desc: '计算方式：下方音第 4 泛音 vs 上方音第 3 泛音。' };
+                case 'majorThird':
+                    return { mult1: 5, mult2: 4, desc: '计算方式：下方音第 5 泛音 vs 上方音第 4 泛音。' };
+                case 'majorSixth':
+                    return { mult1: 5, mult2: 3, desc: '计算方式：下方音第 5 泛音 vs 上方音第 3 泛音。' };
+                default:
+                    return { mult1: 1, mult2: 1, desc: '基频对比' };
+            }
+        }
+
+        // 计算 MIDI 编号
+        function midiFromNote(semitone, octave) {
+            return (octave + 1) * 12 + semitone;
+        }
+
+        // 计算频率
+        function freqFromMidi(midi, a4) {
+            return a4 * Math.pow(2, (midi - 69) / 12);
+        }
+
+        // 获取音名标签
+        function getSemitoneLabel(value) {
+            const s = semitones.find(s => s.value === value);
+            return s ? s.label : '?';
+        }
+
+        createApp({
+            setup() {
+                // 状态
+                const note1 = ref({ semitone: 0, octave: 4 });
+                const note2 = ref({ semitone: 4, octave: 4 });
+                const a4Freq = ref(440);
+                const activePreset = ref('大三度');
+                const intervalName = ref('majorThird');
+                const autoSwapped = ref(false);
+
+                // 播放状态
+                const isPlaying = ref(false);
+                const playVolume = ref(0.15);
+                const playingFreq1 = ref(0);
+                const playingFreq2 = ref(0);
+                let audioCtx = null;
+                let oscillators = [];
+                let gainNode = null;
+
+                // 图表
+                let chartInstance = null;
+
+                // 计算频率
+                const midi1 = computed(() => midiFromNote(note1.value.semitone, note1.value.octave));
+                const midi2 = computed(() => midiFromNote(note2.value.semitone, note2.value.octave));
+                const freq1 = computed(() => freqFromMidi(midi1.value, a4Freq.value));
+                const freq2 = computed(() => freqFromMidi(midi2.value, a4Freq.value));
+
+                // 确定 lower 和 upper
+                const lowerFreq = computed(() => Math.min(freq1.value, freq2.value));
+                const upperFreq = computed(() => Math.max(freq1.value, freq2.value));
+
+                // 自动交换标记
+                watch([freq1, freq2], () => {
+                    autoSwapped.value = freq1.value > freq2.value;
+                }, { immediate: true });
+
+                // 泛音规则
+                const rule = computed(() => getIntervalRule(intervalName.value, lowerFreq.value, upperFreq.value));
+
+                // 拍频
+                const beatRate = computed(() => {
+                    const l = lowerFreq.value;
+                    const u = upperFreq.value;
+                    const r = rule.value;
+                    return Math.abs(l * r.mult1 - u * r.mult2);
+                });
+
+                // 音程描述
+                const intervalDesc = computed(() => {
+                    const p = presets.find(p => p.interval === intervalName.value);
+                    if (p) return p.name;
+                    return '自定义';
+                });
+
+                // 泛音描述
+                const overtoneDesc = computed(() => {
+                    const r = rule.value;
+                    const l = lowerFreq.value;
+                    const u = upperFreq.value;
+                    const f1 = (l * r.mult1).toFixed(2);
+                    const f2 = (u * r.mult2).toFixed(2);
+                    return r.desc + ` 当前泛音频率：${f1} Hz vs ${f2} Hz`;
+                });
+
+                // 应用预置
+                function applyPreset(preset) {
+                    note1.value = { ...preset.n1 };
+                    note2.value = { ...preset.n2 };
+                    intervalName.value = preset.interval;
+                    activePreset.value = preset.name;
+                    stopBeats();
+                }
+
+                // 自动检测音程（当用户手动修改时）
+                function detectInterval() {
+                    const l = lowerFreq.value;
+                    const u = upperFreq.value;
+                    if (l <= 0 || u <= 0) return;
+                    const ratio = u / l;
+
+                    // 检查是否匹配某个预置
+                    for (const p of presets) {
+                        const n1f = freqFromMidi(midiFromNote(p.n1.semitone, p.n1.octave), a4Freq.value);
+                        const n2f = freqFromMidi(midiFromNote(p.n2.semitone, p.n2.octave), a4Freq.value);
+                        const pl = Math.min(n1f, n2f);
+                        const pu = Math.max(n1f, n2f);
+                        const pr = pu / pl;
+                        if (Math.abs(ratio - pr) < 0.01) {
+                            intervalName.value = p.interval;
+                            activePreset.value = p.name;
+                            return;
+                        }
+                    }
+                    // 未匹配，使用基频对比
+                    intervalName.value = 'unison';
+                    activePreset.value = '';
+                }
+
+                // 监听音高变化
+                watch([note1, note2, a4Freq], () => {
+                    detectInterval();
+                    updateChart();
+                }, { deep: true });
+
+                // ===== 播放拍音 =====
+                function getAudioContext() {
+                    if (!audioCtx) {
+                        try {
+                            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                        } catch (e) {
+                            alert('当前浏览器不支持网页音频播放功能。');
+                            return null;
+                        }
+                    }
+                    if (audioCtx.state === 'suspended') {
+                        audioCtx.resume();
+                    }
+                    return audioCtx;
+                }
+
+                function playBeats() {
+                    if (isPlaying.value) return;
+                    const ctx = getAudioContext();
+                    if (!ctx) return;
+
+                    const r = rule.value;
+                    const l = lowerFreq.value;
+                    const u = upperFreq.value;
+                    const f1 = l * r.mult1;
+                    const f2 = u * r.mult2;
+
+                    playingFreq1.value = f1;
+                    playingFreq2.value = f2;
+
+                    // 创建 gain 节点
+                    gainNode = ctx.createGain();
+                    gainNode.gain.value = playVolume.value;
+                    gainNode.connect(ctx.destination);
+
+                    // 创建两个 oscillator
+                    const osc1 = ctx.createOscillator();
+                    osc1.type = 'sine';
+                    osc1.frequency.value = f1;
+                    osc1.connect(gainNode);
+                    osc1.start();
+
+                    const osc2 = ctx.createOscillator();
+                    osc2.type = 'sine';
+                    osc2.frequency.value = f2;
+                    osc2.connect(gainNode);
+                    osc2.start();
+
+                    oscillators = [osc1, osc2];
+                    isPlaying.value = true;
+                }
+
+                function stopBeats() {
+                    oscillators.forEach(osc => {
+                        try { osc.stop(); } catch (e) { /* ignore */ }
+                    });
+                    oscillators = [];
+                    if (gainNode) {
+                        gainNode.disconnect();
+                        gainNode = null;
+                    }
+                    isPlaying.value = false;
+                }
+
+                // 音量变化时更新 gain
+                watch(playVolume, (val) => {
+                    if (gainNode) {
+                        gainNode.gain.value = val;
+                    }
+                });
+
+                // ===== Chart.js 图表 =====
+                function updateChart() {
+                    const canvas = document.getElementById('beatChart');
+                    if (!canvas) return;
+                    // 如果 Chart.js 未加载，显示提示
+                    if (typeof Chart === 'undefined') {
+                        const hint = document.querySelector('.chart-hint');
+                        if (hint) hint.textContent = '⚠️ Chart.js 图表库加载失败，图表无法显示。请检查网络连接后刷新页面。';
+                        return;
+                    }
+
+                    const r = rule.value;
+                    const l = lowerFreq.value;
+                    const u = upperFreq.value;
+                    const f1 = l * r.mult1;
+                    const f2 = u * r.mult2;
+
+                    // 生成模拟数据
+                    const sampleRate = 200;
+                    const duration = 2; // 2 秒
+                    const points = sampleRate * duration;
+                    const labels = [];
+                    const data = [];
+
+                    for (let i = 0; i < points; i++) {
+                        const t = i / sampleRate;
+                        labels.push((t * 1000).toFixed(0) + 'ms');
+                        // 两个正弦波叠加
+                        const val = Math.sin(2 * Math.PI * f1 * t) + Math.sin(2 * Math.PI * f2 * t);
+                        data.push(val);
+                    }
+
+                    if (chartInstance) {
+                        chartInstance.destroy();
+                    }
+
+                    const ctx = canvas.getContext('2d');
+                    chartInstance = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: '叠加波形',
+                                data: data,
+                                borderColor: '#c9a03a',
+                                backgroundColor: 'rgba(201,160,58,0.05)',
+                                borderWidth: 1.5,
+                                pointRadius: 0,
+                                tension: 0.1
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            animation: false,
+                            plugins: {
+                                legend: { display: false }
+                            },
+                            scales: {
+                                x: {
+                                    display: true,
+                                    ticks: {
+                                        color: '#667788',
+                                        font: { size: 9 },
+                                        maxTicksLimit: 8
+                                    },
+                                    grid: { color: 'rgba(255,255,255,0.05)' },
+                                    title: {
+                                        display: true,
+                                        text: '时间 (ms)',
+                                        color: '#667788',
+                                        font: { size: 10 }
+                                    }
+                                },
+                                y: {
+                                    display: true,
+                                    ticks: {
+                                        color: '#667788',
+                                        font: { size: 9 },
+                                        maxTicksLimit: 5
+                                    },
+                                    grid: { color: 'rgba(255,255,255,0.05)' },
+                                    title: {
+                                        display: true,
+                                        text: '振幅',
+                                        color: '#667788',
+                                        font: { size: 10 }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+
+                // 初始化图表
+                onMounted(() => {
+                    setTimeout(updateChart, 100);
+                });
+
+                onUnmounted(() => {
+                    stopBeats();
+                    if (chartInstance) {
+                        chartInstance.destroy();
+                    }
+                    if (audioCtx) {
+                        audioCtx.close();
+                        audioCtx = null;
+                    }
+                });
+
+                return {
+                    semitones, presets,
+                    note1, note2, a4Freq, activePreset,
+                    freq1, freq2, beatRate, intervalDesc, overtoneDesc,
+                    autoSwapped, isPlaying, playVolume,
+                    playingFreq1, playingFreq2,
+                    applyPreset, playBeats, stopBeats
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
