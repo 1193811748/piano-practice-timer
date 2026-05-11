@@ -675,6 +675,124 @@ h2 {
     font-size: 0.9rem;
 }
 
+/* ===== 节拍器区域 ===== */
+.metronome-controls {
+    margin-bottom: 16px;
+}
+
+.metronome-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+.metronome-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 80px;
+}
+
+.metronome-item label {
+    font-size: 0.8rem;
+    color: #8899aa;
+}
+
+.metronome-item input,
+.metronome-item select {
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #e0e0e0;
+    font-size: 0.9rem;
+    outline: none;
+    width: 100%;
+}
+
+.metronome-item input:focus,
+.metronome-item select:focus {
+    border-color: #f0c27f;
+}
+
+.metronome-item select option {
+    background: #1a1a2e;
+    color: #e0e0e0;
+}
+
+/* 节拍视觉反馈 */
+.metronome-visual {
+    text-align: center;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.beat-indicators {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.beat-dot {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #667788;
+    transition: all 0.1s ease;
+}
+
+.beat-dot.active-strong {
+    background: #f0c27f;
+    border-color: #f0c27f;
+    color: #1a1a2e;
+    transform: scale(1.2);
+    box-shadow: 0 0 16px rgba(240, 194, 127, 0.5);
+}
+
+.beat-dot.active-weak {
+    background: rgba(240, 194, 127, 0.3);
+    border-color: rgba(240, 194, 127, 0.5);
+    color: #f0c27f;
+    transform: scale(1.05);
+}
+
+.beat-info {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+}
+
+#beatDisplay {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #f0c27f;
+}
+
+.beat-bpm {
+    font-size: 0.9rem;
+    color: #8899aa;
+}
+
+/* 环境噪音偏高状态 */
+.focus-status.high-noise {
+    color: #e67e22;
+    background: rgba(230, 126, 34, 0.12);
+    border: 1px solid rgba(230, 126, 34, 0.25);
+}
+
 /* ===== 响应式 ===== */
 @media (max-width: 600px) {
     body {

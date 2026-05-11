@@ -5,9 +5,12 @@
  * 1. 自定义添加练习/休息阶段
  * 2. 倒计时器（开始/暂停/继续/重置）
  * 3. 阶段自动切换 / 手动切换模式
- * 4. 阶段切换语音播报
- * 5. 麦克风音量检测专注度
- * 6. 练习完成总结弹窗
+ * 4. 任意时候可点击"下一阶段"提前切换
+ * 5. 阶段切换语音播报
+ * 6. 钢琴频谱检测专注度（含环境噪音校准、峰值计数）
+ * 7. 节拍器（Web Audio API 生成点击音）
+ * 8. 练习完成总结弹窗
+ * 9. 调试面板
  */
 
 // ============================================================
@@ -41,6 +44,15 @@ let practiceStartTime = null;
 /** 总练习时长（秒） */
 let totalPracticeSeconds = 0;
 
+/** 提前切换次数 */
+let skipCount = 0;
+
+/** 节拍器是否使用过 */
+let metronomeWasUsed = false;
+
+/** 防止 goToNextStage 重复执行 */
+let isNavigatingStage = false;
+
 // ============================================================
 // 二、DOM 元素引用
 // ============================================================
@@ -62,6 +74,7 @@ const countdownEl = document.getElementById('countdown');
 const startBtn = document.getElementById('startBtn');
 const pauseBtn = document.getElementById('pauseBtn');
 const resetBtn = document.getElementById('resetBtn');
+const nextStageBtn = document.getElementById('nextStageBtn');
 
 // 切换模式单选按钮
 const switchModeRadios = document.querySelectorAll('input[name="switchMode"]');
@@ -80,6 +93,8 @@ const micBtn = document.getElementById('micBtn');
 const micStatus = document.getElementById('micStatus');
 const volumeBar = document.getElementById('volumeBar');
 const focusStatus = document.getElementById('focusStatus');
+const calibrateBtn = document.getElementById('calibrateBtn');
+const calibrateStatus = document.getElementById('calibrateStatus');
 
 // 检测模式
 const modeSimple = document.getElementById('modeSimple');
@@ -88,6 +103,7 @@ const modePiano = document.getElementById('modePiano');
 // 实时检测数据显示
 const focusDb = document.getElementById('focusDb');
 const focusPianoRatio = document.getElementById('focusPianoRatio');
+const focusPeakCount = document.getElementById('focusPeakCount');
 const focusModeLabel = document.getElementById('focusModeLabel');
 const focusIdleTime = document.getElementById('focusIdleTime');
 const focusReminderDisplay = document.getElementById('focusReminderDisplay');
@@ -97,14 +113,26 @@ const settingVolumeThreshold = document.getElementById('settingVolumeThreshold')
 const settingFreqLow = document.getElementById('settingFreqLow');
 const settingFreqHigh = document.getElementById('settingFreqHigh');
 const settingRatioThreshold = document.getElementById('settingRatioThreshold');
+const settingPeakThreshold = document.getElementById('settingPeakThreshold');
+const settingHoldTime = document.getElementById('settingHoldTime');
 const settingSilentTimeout = document.getElementById('settingSilentTimeout');
 
+// 节拍器
+const metronomeBpm = document.getElementById('metronomeBpm');
+const metronomeTimeSig = document.getElementById('metronomeTimeSig');
+const metronomeToggleBtn = document.getElementById('metronomeToggleBtn');
+const metronomeAutoToggle = document.getElementById('metronomeAutoToggle');
+const beatIndicators = document.getElementById('beatIndicators');
+const beatDisplay = document.getElementById('beatDisplay');
+const bpmDisplay = document.getElementById('bpmDisplay');
 
 // 总结弹窗
 const summaryModal = document.getElementById('summaryModal');
 const summaryTotalTime = document.getElementById('summaryTotalTime');
 const summaryStageCount = document.getElementById('summaryStageCount');
+const summarySkipCount = document.getElementById('summarySkipCount');
 const summaryFocusCount = document.getElementById('summaryFocusCount');
+const summaryMetronomeUsed = document.getElementById('summaryMetronomeUsed');
 const summaryStatus = document.getElementById('summaryStatus');
 const restartBtn = document.getElementById('restartBtn');
 const closeModalBtn = document.getElementById('closeModalBtn');
@@ -153,7 +181,6 @@ function updateDisplay() {
         const stage = stages[currentStageIndex];
         currentStageNameEl.textContent = stage.name;
         currentStageTypeEl.textContent = stage.type;
-        // 设置 data-type 属性用于 CSS 区分类型颜色
         currentStageTypeEl.setAttribute('data-type', stage.type);
     } else {
         currentStageNameEl.textContent = '--';
@@ -170,6 +197,9 @@ function updateDisplay() {
 
     // 更新阶段列表
     renderStageList();
+
+    // 更新调试面板
+    updateDebugPanel();
 }
 
 /**
@@ -190,14 +220,17 @@ function startTimer() {
         practiceStartTime = Date.now();
         totalPracticeSeconds = 0;
         focusReminderCount = 0;
+        skipCount = 0;
+        metronomeWasUsed = false;
         speak(`开始：${stages[0].name}`);
     }
-
-    // 如果从暂停状态继续，remainingSeconds 保持不变
 
     timerState = 'running';
     updateButtonStates();
     hideManualControls();
+
+    // 如果节拍器设为练习阶段自动开启，且当前是练习阶段，则开启节拍器
+    handleAutoMetronome();
 
     timerInterval = setInterval(() => {
         remainingSeconds--;
@@ -205,7 +238,7 @@ function startTimer() {
         if (remainingSeconds <= 0) {
             // 根据切换模式决定行为
             if (switchMode === 'auto') {
-                nextStage();
+                goToNextStageInternal();
             } else {
                 // 手动模式：暂停在完成状态，显示手动控制按钮
                 clearInterval(timerInterval);
@@ -232,6 +265,8 @@ function pauseTimer() {
     timerState = 'paused';
     clearInterval(timerInterval);
     timerInterval = null;
+    // 暂停节拍器
+    stopMetronome();
     updateButtonStates();
 }
 
@@ -248,16 +283,19 @@ function resetTimer() {
     practiceStartTime = null;
     totalPracticeSeconds = 0;
     focusReminderCount = 0;
+    skipCount = 0;
+    metronomeWasUsed = false;
 
+    stopMetronome();
     hideManualControls();
     updateButtonStates();
     updateDisplay();
 }
 
 /**
- * 自动切换到下一个阶段（自动模式使用）
+ * 内部使用的下一阶段切换（倒计时结束自动切换）
  */
-function nextStage() {
+function goToNextStageInternal() {
     // 播报当前阶段结束
     if (currentStageIndex < stages.length) {
         speak(`${stages[currentStageIndex].name}结束`);
@@ -275,43 +313,100 @@ function nextStage() {
     remainingSeconds = stages[currentStageIndex].minutes * 60;
     speak(`开始：${stages[currentStageIndex].name}`);
 
+    // 处理节拍器自动切换
+    handleAutoMetronome();
+
     updateDisplay();
 }
 
 /**
- * 手动模式：进入下一阶段
+ * 用户主动点击"下一阶段"按钮
+ * 可在任何时候提前切换到下一阶段
+ * 修复：防止重复点击，确保在任何状态下都能正确切换
  */
 function goToNextStage() {
+    // 防止重复点击（300ms 内只执行一次）
+    if (isNavigatingStage) return;
+    isNavigatingStage = true;
+    setTimeout(() => { isNavigatingStage = false; }, 300);
+
+    // 如果还没有开始练习，显示提示
+    if (timerState === 'idle') {
+        alert('请先开始练习');
+        isNavigatingStage = false;
+        return;
+    }
+
+    // 如果练习已结束，不执行
+    if (timerState === 'completed') return;
+
+    // 清除当前倒计时定时器（关键修复：先清除再切换）
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+
+    // 如果当前是 manual_waiting 状态，隐藏手动控制
+    if (timerState === 'manual_waiting') {
+        hideManualControls();
+    }
+
+    // 记录提前切换（如果还有剩余时间且正在运行）
+    if (timerState === 'running' && remainingSeconds > 0) {
+        skipCount++;
+    }
+
+    // 播报当前阶段结束
     if (currentStageIndex < stages.length) {
         speak(`${stages[currentStageIndex].name}结束`);
     }
 
     currentStageIndex++;
 
+    // 如果所有阶段都已完成
     if (currentStageIndex >= stages.length) {
         finishPractice();
         return;
     }
 
+    // 设置下一个阶段的剩余时间
     remainingSeconds = stages[currentStageIndex].minutes * 60;
+
+    // 如果之前是暂停状态，切换到下一阶段但保持暂停
+    if (timerState === 'paused') {
+        timerState = 'paused';
+        updateDisplay();
+        updateButtonStates();
+        speak(`下一阶段：${stages[currentStageIndex].name}`);
+        handleAutoMetronome();
+        return;
+    }
+
+    // 重新开始倒计时
     timerState = 'running';
-    hideManualControls();
     updateButtonStates();
     speak(`开始：${stages[currentStageIndex].name}`);
 
-    // 重新开始倒计时
+    // 处理节拍器自动切换
+    handleAutoMetronome();
+
+    // 启动新的倒计时
     timerInterval = setInterval(() => {
         remainingSeconds--;
 
         if (remainingSeconds <= 0) {
-            clearInterval(timerInterval);
-            timerInterval = null;
-            timerState = 'manual_waiting';
-            remainingSeconds = 0;
-            updateDisplay();
-            updateButtonStates();
-            showManualControls();
-            speak(`${stages[currentStageIndex].name}已完成，请选择操作`);
+            if (switchMode === 'auto') {
+                goToNextStageInternal();
+            } else {
+                clearInterval(timerInterval);
+                timerInterval = null;
+                timerState = 'manual_waiting';
+                remainingSeconds = 0;
+                updateDisplay();
+                updateButtonStates();
+                showManualControls();
+                speak(`${stages[currentStageIndex].name}已完成，请选择操作`);
+            }
         }
 
         updateDisplay();
@@ -329,6 +424,8 @@ function retryCurrentStage() {
     hideManualControls();
     updateButtonStates();
     speak(`重新开始：${stages[currentStageIndex].name}`);
+
+    handleAutoMetronome();
 
     timerInterval = setInterval(() => {
         remainingSeconds--;
@@ -358,11 +455,9 @@ function endPractice() {
     timerInterval = null;
     timerState = 'idle';
     hideManualControls();
+    stopMetronome();
 
-    // 计算已完成的练习时间
     calculateTotalPracticeTime();
-
-    // 显示总结弹窗（提前结束）
     showSummaryModal(false);
 }
 
@@ -375,22 +470,21 @@ function finishPractice() {
     timerState = 'idle';
     remainingSeconds = 0;
     hideManualControls();
+    stopMetronome();
 
     calculateTotalPracticeTime();
     updateDisplay();
     updateButtonStates();
     speak('所有练习阶段已完成，太棒了！');
 
-    // 显示总结弹窗（全部完成）
     showSummaryModal(true);
 }
 
 /**
- * 计算总练习时长（只计算练习类型，不包含休息）
+ * 计算总练习时长
  */
 function calculateTotalPracticeTime() {
     if (practiceStartTime) {
-        // 计算从开始到现在的总时间
         const elapsed = Math.floor((Date.now() - practiceStartTime) / 1000);
         totalPracticeSeconds = elapsed;
     }
@@ -412,6 +506,7 @@ function hideManualControls() {
 
 /**
  * 更新按钮的启用/禁用状态
+ * 修复：确保下一阶段按钮在 running/paused/manual_waiting 时可用
  */
 function updateButtonStates() {
     switch (timerState) {
@@ -420,23 +515,27 @@ function updateButtonStates() {
             startBtn.textContent = '▶ 开始练习';
             pauseBtn.disabled = true;
             resetBtn.disabled = true;
+            nextStageBtn.disabled = true;
             break;
         case 'running':
             startBtn.disabled = true;
             pauseBtn.disabled = false;
             pauseBtn.textContent = '⏸ 暂停';
             resetBtn.disabled = false;
+            nextStageBtn.disabled = false;
             break;
         case 'paused':
             startBtn.disabled = false;
             startBtn.textContent = '▶ 继续练习';
             pauseBtn.disabled = true;
             resetBtn.disabled = false;
+            nextStageBtn.disabled = false;
             break;
         case 'manual_waiting':
             startBtn.disabled = true;
             pauseBtn.disabled = true;
             resetBtn.disabled = false;
+            nextStageBtn.disabled = false;
             break;
     }
 }
@@ -506,12 +605,6 @@ function deleteStage(index) {
 
 /**
  * 渲染阶段列表到页面
- *
- * 三种状态：
- * - 已完成（completed）：显示绿色勾选标记，半透明
- * - 进行中（active）：金色高亮边框
- * - 未开始：普通样式
- * 练习和休息类型用不同颜色标签区分
  */
 function renderStageList() {
     stageListEl.innerHTML = '';
@@ -544,7 +637,7 @@ function renderStageList() {
         nameSpan.className = 'stage-item-name';
         nameSpan.textContent = stage.name;
 
-        // 阶段类型标签（使用 data-type 属性让 CSS 区分颜色）
+        // 阶段类型标签
         const typeSpan = document.createElement('span');
         typeSpan.className = 'stage-item-type';
         typeSpan.textContent = stage.type;
@@ -579,21 +672,17 @@ function renderStageList() {
  * @param {boolean} allCompleted - 是否全部完成
  */
 function showSummaryModal(allCompleted) {
-    // 计算总练习时长（格式化为分钟）
     const totalMinutes = Math.ceil(totalPracticeSeconds / 60);
     summaryTotalTime.textContent = `${totalMinutes} 分钟`;
 
-    // 完成阶段数（当前索引即为已完成的阶段数）
     summaryStageCount.textContent = `${currentStageIndex} / ${stages.length}`;
-
-    // 专注提醒次数
+    summarySkipCount.textContent = `${skipCount} 次`;
     summaryFocusCount.textContent = `${focusReminderCount} 次`;
+    summaryMetronomeUsed.textContent = metronomeWasUsed ? '是' : '否';
 
-    // 完成状态
     summaryStatus.textContent = allCompleted ? '✅ 全部完成' : '⏹ 提前结束';
     summaryStatus.style.color = allCompleted ? '#27ae60' : '#e67e22';
 
-    // 显示弹窗
     summaryModal.style.display = 'flex';
 }
 
@@ -626,7 +715,7 @@ let microphone = null;
 let mediaStream = null;
 let animationFrameId = null;
 
-/** 上次检测到练琴活动的时间戳（钢琴模式用） */
+/** 上次检测到练琴活动的时间戳 */
 let lastActivityTime = Date.now();
 
 /** 静音检测定时器 ID */
@@ -638,12 +727,15 @@ let lastSilentWarningSpoken = false;
 /** 当前检测模式：'simple' 或 'piano' */
 let currentFocusMode = 'piano';
 
-/** 钢琴频段检测持续满足条件的帧计数（用于判断持续 >= 1 秒） */
+/** 钢琴频段检测持续满足条件的帧计数 */
 let pianoActiveFrameCount = 0;
-const PIANO_HOLD_FRAMES = 10; // 约 1 秒（按 10fps 估算）
 
 /** 上次更新实时数据的时间（节流用） */
 let lastDataUpdateTime = 0;
+
+/** 环境噪音校准数据 */
+let backgroundNoiseLevel = null;
+let isCalibrated = false;
 
 /**
  * 获取当前检测模式
@@ -678,14 +770,12 @@ function isSecureContext() {
  * 开启麦克风检测
  */
 async function startMicDetection() {
-    // 检查是否 HTTPS 环境
     if (!isSecureContext() && !navigator.mediaDevices) {
         focusStatus.textContent = '⚠️ 麦克风检测通常需要 HTTPS 安全网页环境。请使用正式发布链接访问。';
         focusStatus.className = 'focus-status warning';
         return;
     }
 
-    // 检查浏览器是否支持 getUserMedia
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         focusStatus.textContent = '⚠️ 您的浏览器不支持麦克风检测功能，请使用最新版 Chrome 或 Edge 浏览器。';
         focusStatus.className = 'focus-status warning';
@@ -701,7 +791,6 @@ async function startMicDetection() {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const source = audioContext.createMediaStreamSource(mediaStream);
 
-        // 使用 1024 的 fftSize 以获得更好的频率分辨率
         analyser = audioContext.createAnalyser();
         analyser.fftSize = 1024;
 
@@ -719,17 +808,13 @@ async function startMicDetection() {
         lastSilentWarningSpoken = false;
         pianoActiveFrameCount = 0;
 
-        // 更新检测模式标签
         focusModeLabel.textContent = currentFocusMode === 'piano' ? '钢琴频段' : '简单音量';
 
-        // 开始检测循环（使用 requestAnimationFrame 驱动）
         updateVolume();
 
-        // 每秒检查一次是否停止练习
         silentCheckInterval = setInterval(checkSilent, 1000);
     } catch (err) {
         console.error('麦克风访问被拒绝:', err);
-        // 用户拒绝权限时的友好提示
         focusStatus.textContent = '⚠️ 麦克风权限未开启，专注度检测无法使用。你仍然可以使用练琴计时器。';
         focusStatus.className = 'focus-status warning';
         micBtn.textContent = '🎙️ 开启专注度检测';
@@ -737,7 +822,6 @@ async function startMicDetection() {
         micStatus.style.color = '#e74c3c';
     }
 }
-
 
 /**
  * 关闭麦克风检测
@@ -753,6 +837,7 @@ function stopMicDetection() {
     volumeBar.style.width = '0%';
     focusDb.textContent = '-- dB';
     focusPianoRatio.textContent = '--%';
+    focusPeakCount.textContent = '--';
     focusIdleTime.textContent = '0 秒';
 
     if (animationFrameId) {
@@ -786,43 +871,93 @@ function stopMicDetection() {
  */
 function amplitudeToDb(amplitude) {
     if (amplitude <= 0) return -80;
-    // 归一化到 0-1 范围，然后转 dB
     const normalized = amplitude / 128;
     return Math.max(-80, Math.round(20 * Math.log10(normalized) * 10) / 10);
 }
 
 /**
+ * 环境噪音校准
+ * 采集 3 秒环境声音，估算 backgroundNoiseLevel
+ */
+async function calibrateBackgroundNoise() {
+    if (!isMicActive || !analyser) {
+        focusStatus.textContent = '⚠️ 请先开启麦克风检测再进行校准';
+        focusStatus.className = 'focus-status warning';
+        return;
+    }
+
+    calibrateBtn.disabled = true;
+    calibrateBtn.textContent = '⏳ 采集中...';
+    calibrateStatus.textContent = '采集中';
+    calibrateStatus.style.color = '#f0c27f';
+
+    const samples = [];
+    const sampleCount = 30;
+
+    for (let i = 0; i < sampleCount; i++) {
+        const timeData = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteTimeDomainData(timeData);
+
+        let maxAmplitude = 0;
+        for (let j = 0; j < timeData.length; j++) {
+            const amp = Math.abs(timeData[j] - 128);
+            if (amp > maxAmplitude) maxAmplitude = amp;
+        }
+        samples.push(maxAmplitude);
+
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    samples.sort((a, b) => a - b);
+    const median = samples[Math.floor(samples.length / 2)];
+    backgroundNoiseLevel = amplitudeToDb(median);
+    isCalibrated = true;
+
+    calibrateBtn.disabled = false;
+    calibrateBtn.textContent = '🔇 环境噪音校准';
+    calibrateStatus.textContent = `已校准 (${backgroundNoiseLevel.toFixed(1)} dB)`;
+    calibrateStatus.style.color = '#27ae60';
+
+    focusStatus.textContent = `✅ 环境噪音校准完成，背景噪音约 ${backgroundNoiseLevel.toFixed(1)} dB`;
+    focusStatus.className = 'focus-status ok';
+}
+
+/**
+ * 计算钢琴频段内的频谱峰值数量
+ */
+function countPeaksInPianoBand(freqData, freqPerBin, pianoLowHz, pianoHighHz) {
+    let peakCount = 0;
+    const noiseThreshold = isCalibrated
+        ? Math.max(5, Math.min(128, (backgroundNoiseLevel + 80) / 80 * 128))
+        : 10;
+
+    for (let i = 1; i < freqData.length - 1; i++) {
+        const frequency = i * freqPerBin;
+        if (frequency < pianoLowHz || frequency > pianoHighHz) continue;
+
+        const energy = freqData[i];
+        if (energy > freqData[i - 1] && energy > freqData[i + 1] && energy > noiseThreshold) {
+            peakCount++;
+        }
+    }
+
+    return peakCount;
+}
+
+/**
  * 钢琴频段检测 - 核心检测函数
- *
- * 逻辑：
- * 1. 从 AnalyserNode 获取频谱数据（getByteFrequencyData）
- * 2. 根据 sampleRate 和 fftSize 计算每个频率 bin 对应的频率
- * 3. 计算总频谱能量 totalEnergy
- * 4. 计算用户设置的钢琴频率范围内的能量 pianoBandEnergy
- * 5. 计算 pianoBandRatio = pianoBandEnergy / totalEnergy
- * 6. 同时计算当前音量 dB
- * 7. 只有当：
- *    a) 当前音量高于用户设置的分贝阈值
- *    b) pianoBandRatio 高于用户设置的钢琴频段能量占比阈值
- *    c) 该状态持续至少 1 秒（约 10 帧）
- *    才判断为"检测到练琴活动"
- *
- * @returns {{ isActive: boolean, db: number, ratio: number }}
  */
 function detectPianoActivity() {
     if (!analyser || !audioContext) {
-        return { isActive: false, db: -80, ratio: 0 };
+        return { isActive: false, db: -80, ratio: 0, peakCount: 0 };
     }
 
-    // 获取频谱数据（频域）
     const freqData = new Uint8Array(analyser.frequencyBinCount);
     analyser.getByteFrequencyData(freqData);
 
-    // 获取时域数据用于计算音量
     const timeData = new Uint8Array(analyser.frequencyBinCount);
     analyser.getByteTimeDomainData(timeData);
 
-    // ---- 计算当前音量 dB ----
     let maxAmplitude = 0;
     for (let i = 0; i < timeData.length; i++) {
         const amp = Math.abs(timeData[i] - 128);
@@ -830,64 +965,61 @@ function detectPianoActivity() {
     }
     const currentDb = amplitudeToDb(maxAmplitude);
 
-    // ---- 计算频谱能量 ----
-    // 每个 bin 对应的频率 = binIndex * sampleRate / fftSize
     const sampleRate = audioContext.sampleRate;
     const fftSize = analyser.fftSize;
     const freqPerBin = sampleRate / fftSize;
 
-    // 读取用户设置
     const pianoLowHz = parseFloat(settingFreqLow.value) || 80;
     const pianoHighHz = parseFloat(settingFreqHigh.value) || 4200;
     const ratioThreshold = (parseFloat(settingRatioThreshold.value) || 45) / 100;
     const dbThreshold = parseFloat(settingVolumeThreshold.value) || -45;
+    const peakThreshold = parseFloat(settingPeakThreshold.value) || 3;
+    const holdTime = parseFloat(settingHoldTime.value) || 1;
+    const holdFrames = Math.max(1, Math.round(holdTime * 10));
 
-    // 计算总能量和钢琴频段能量
     let totalEnergy = 0;
     let pianoBandEnergy = 0;
 
     for (let i = 0; i < freqData.length; i++) {
         const frequency = i * freqPerBin;
-        const energy = freqData[i]; // 0-255
-
+        const energy = freqData[i];
         totalEnergy += energy;
 
-        // 判断是否在钢琴频率范围内
         if (frequency >= pianoLowHz && frequency <= pianoHighHz) {
             pianoBandEnergy += energy;
         }
     }
 
-    // 计算钢琴频段能量占比
     const pianoBandRatio = totalEnergy > 0 ? pianoBandEnergy / totalEnergy : 0;
+    const peakCount = countPeaksInPianoBand(freqData, freqPerBin, pianoLowHz, pianoHighHz);
 
-    // ---- 判断是否检测到练琴活动 ----
     const volumeOk = currentDb > dbThreshold;
     const ratioOk = pianoBandRatio > ratioThreshold;
+    const peakOk = peakCount >= peakThreshold;
 
-    // 持续计数：需要连续多帧满足条件才算活跃
-    if (volumeOk && ratioOk) {
+    if (volumeOk && ratioOk && peakOk) {
         pianoActiveFrameCount++;
     } else {
         pianoActiveFrameCount = 0;
     }
 
-    // 需要持续约 1 秒（~10 帧）才判定为练琴活动
-    const isActive = pianoActiveFrameCount >= PIANO_HOLD_FRAMES;
+    const isActive = pianoActiveFrameCount >= holdFrames;
 
     return {
         isActive: isActive,
         db: currentDb,
         ratio: pianoBandRatio,
+        peakCount: peakCount,
         volumeOk: volumeOk,
         ratioOk: ratioOk,
-        frameCount: pianoActiveFrameCount
+        peakOk: peakOk,
+        frameCount: pianoActiveFrameCount,
+        holdFrames: holdFrames
     };
 }
 
 /**
- * 简单音量检测 - 只根据音量判断是否有声音
- * @returns {{ isActive: boolean, db: number }}
+ * 简单音量检测
  */
 function detectSimpleActivity() {
     if (!analyser) {
@@ -913,7 +1045,7 @@ function detectSimpleActivity() {
 }
 
 /**
- * 更新音量可视化和检测数据（使用 requestAnimationFrame 驱动）
+ * 更新音量可视化和检测数据
  */
 function updateVolume() {
     if (!isMicActive || !analyser) return;
@@ -921,47 +1053,50 @@ function updateVolume() {
     const mode = getFocusMode();
     currentFocusMode = mode;
 
-    // 更新检测模式标签
     focusModeLabel.textContent = mode === 'piano' ? '钢琴频段' : '简单音量';
 
-    // 根据模式执行检测
     let isActive = false;
     let currentDb = -80;
     let pianoRatio = 0;
+    let peakCount = 0;
 
     if (mode === 'piano') {
         const result = detectPianoActivity();
         isActive = result.isActive;
         currentDb = result.db;
         pianoRatio = result.ratio;
+        peakCount = result.peakCount;
 
-        // 更新音量条（基于 dB 映射到 0-100%）
         const barPercent = Math.min(100, Math.max(0, ((currentDb + 80) / 80) * 100));
         volumeBar.style.width = barPercent + '%';
 
-        // 更新实时数据显示（节流到约 10fps）
         const now = Date.now();
         if (now - lastDataUpdateTime > 100) {
             focusDb.textContent = currentDb.toFixed(1) + ' dB';
             focusPianoRatio.textContent = (pianoRatio * 100).toFixed(1) + '%';
+            focusPeakCount.textContent = peakCount;
             lastDataUpdateTime = now;
         }
 
-        // 更新状态显示
         if (isActive) {
-            // 检测到练琴活动 → 重置计时
             lastActivityTime = Date.now();
             lastSilentWarningSpoken = false;
             focusStatus.textContent = '🎹 可能正在练琴';
             focusStatus.className = 'focus-status practicing';
         } else if (result.volumeOk && !result.ratioOk) {
-            // 有声音但不符合钢琴频段特征
             focusStatus.textContent = '⚠️ 检测到声音但不符合钢琴频段特征';
             focusStatus.className = 'focus-status not-piano';
+        } else if (result.volumeOk && result.ratioOk && !result.peakOk) {
+            focusStatus.textContent = '⚠️ 频谱峰值不足，可能不是钢琴声音';
+            focusStatus.className = 'focus-status not-piano';
         } else if (!result.volumeOk) {
-            // 声音不足
             focusStatus.textContent = '🔇 声音不足';
             focusStatus.className = 'focus-status low-volume';
+        }
+
+        if (isCalibrated && currentDb > backgroundNoiseLevel + 15 && !isActive) {
+            focusStatus.textContent = '⚠️ 环境噪音偏高，建议重新校准';
+            focusStatus.className = 'focus-status high-noise';
         }
     } else {
         // 简单音量检测模式
@@ -969,7 +1104,6 @@ function updateVolume() {
         isActive = result.isActive;
         currentDb = result.db;
 
-        // 更新音量条
         const barPercent = Math.min(100, Math.max(0, ((currentDb + 80) / 80) * 100));
         volumeBar.style.width = barPercent + '%';
 
@@ -977,6 +1111,7 @@ function updateVolume() {
         if (now - lastDataUpdateTime > 100) {
             focusDb.textContent = currentDb.toFixed(1) + ' dB';
             focusPianoRatio.textContent = '-- (简单模式)';
+            focusPeakCount.textContent = '--';
             lastDataUpdateTime = now;
         }
 
@@ -1004,9 +1139,6 @@ function updateVolume() {
 
 /**
  * 检查是否连续未检测到练琴活动超过设定时间（每秒执行一次）
- *
- * 注意：在钢琴频段检测模式下，只有符合钢琴频段检测条件的声音才能重置计时
- * 不是只要有环境声音就重置
  */
 function checkSilent() {
     if (!isMicActive) return;
@@ -1015,13 +1147,11 @@ function checkSilent() {
     const elapsed = (Date.now() - lastActivityTime) / 1000;
 
     if (elapsed >= silentTimeout) {
-        // 连续未检测到练琴活动超过设定时间
         const mode = getFocusMode();
         const modeText = mode === 'piano' ? '钢琴频段' : '简单音量';
         focusStatus.textContent = `⚠️ 检测到你可能停止练习了，已 ${Math.floor(elapsed)} 秒未检测到练琴活动（${modeText}）！`;
         focusStatus.className = 'focus-status warning';
 
-        // 语音播报提醒（每 5 秒播报一次）
         if (!lastSilentWarningSpoken || Math.floor(elapsed) % 5 === 0) {
             speak('检测到你可能停止练习了，请继续练习');
             lastSilentWarningSpoken = true;
@@ -1031,9 +1161,427 @@ function checkSilent() {
     }
 }
 
+// ============================================================
+// 八、节拍器功能（修复：确保声音正常播放）
+// ============================================================
+
+/** 节拍器是否正在运行 */
+let metronomeRunning = false;
+
+/** 节拍器定时器 ID */
+let metronomeInterval = null;
+
+/** 当前拍数（从 1 开始） */
+let currentBeat = 1;
+
+/** 节拍器 AudioContext（独立于麦克风） */
+let metronomeAudioCtx = null;
+
+/** 节拍器最近一次播放是否成功 */
+let lastMetronomePlaySuccess = false;
+
+/** 节拍器最近一次错误信息 */
+let lastMetronomeError = '';
+
+/**
+ * 获取或创建节拍器的 AudioContext
+ * 修复：由用户点击触发创建，并处理 suspended 状态
+ */
+function getMetronomeAudioContext() {
+    try {
+        if (!metronomeAudioCtx) {
+            metronomeAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        // 如果 AudioContext 被暂停，尝试恢复
+        if (metronomeAudioCtx.state === 'suspended') {
+            metronomeAudioCtx.resume();
+        }
+        return metronomeAudioCtx;
+    } catch (err) {
+        lastMetronomeError = '创建 AudioContext 失败: ' + err.message;
+        return null;
+    }
+}
+
+/**
+ * 播放节拍点击音
+ * 修复：确保每次调用都正确创建 oscillator 并播放声音
+ * @param {boolean} isStrongBeat - 是否为强拍
+ */
+function playMetronomeClick(isStrongBeat) {
+    lastMetronomePlaySuccess = false;
+    try {
+        const ctx = getMetronomeAudioContext();
+        if (!ctx) {
+            lastMetronomeError = 'AudioContext 不可用';
+            return;
+        }
+
+        // 创建 oscillator（振荡器）
+        const oscillator = ctx.createOscillator();
+        // 创建 gain（音量控制器）
+        const gainNode = ctx.createGain();
+
+        // 连接：oscillator -> gainNode -> 扬声器
+        oscillator.connect(gainNode);
+        gainNode.connect(ctx.destination);
+
+        // 强拍：频率 1000Hz，音量 0.15
+        // 弱拍：频率 700Hz，音量 0.1
+        oscillator.frequency.value = isStrongBeat ? 1000 : 700;
+        oscillator.type = 'sine';
+
+        // 设置音量包络（快速衰减，产生点击效果）
+        const now = ctx.currentTime;
+        gainNode.gain.setValueAtTime(isStrongBeat ? 0.15 : 0.1, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+
+        // 播放
+        oscillator.start(now);
+        oscillator.stop(now + 0.08);
+
+        lastMetronomePlaySuccess = true;
+        lastMetronomeError = '';
+    } catch (err) {
+        lastMetronomeError = '播放节拍声音失败: ' + err.message;
+        console.error('节拍器播放错误:', err);
+    }
+}
+
+/**
+ * 获取拍号的总拍数
+ * @param {string} timeSig - 拍号字符串，如 "4/4"
+ * @returns {number} 每小节拍数
+ */
+function getBeatsPerMeasure(timeSig) {
+    const parts = timeSig.split('/');
+    return parseInt(parts[0]) || 4;
+}
+
+/**
+ * 更新节拍视觉反馈
+ * @param {number} beat - 当前拍数
+ * @param {number} beatsPerMeasure - 每小节拍数
+ */
+function updateBeatVisual(beat, beatsPerMeasure) {
+    const dots = beatIndicators.querySelectorAll('.beat-dot');
+
+    dots.forEach((dot, index) => {
+        dot.classList.remove('active-strong', 'active-weak');
+
+        if (index < beatsPerMeasure) {
+            dot.style.display = 'flex';
+            if (index + 1 === beat) {
+                if (beat === 1) {
+                    dot.classList.add('active-strong');
+                } else {
+                    dot.classList.add('active-weak');
+                }
+            }
+        } else {
+            dot.style.display = 'none';
+        }
+    });
+
+    beatDisplay.textContent = `${beat} / ${beatsPerMeasure}`;
+}
+
+/**
+ * 更新节拍器显示信息
+ */
+function updateMetronomeDisplay() {
+    const bpm = parseInt(metronomeBpm.value) || 80;
+    bpmDisplay.textContent = `${bpm} BPM`;
+}
+
+/**
+ * 开启节拍器
+ * 修复：确保 BPM 正确转换为毫秒，定时器正常启动
+ */
+function startMetronome() {
+    const bpm = parseInt(metronomeBpm.value) || 80;
+    const timeSig = metronomeTimeSig.value;
+    const beatsPerMeasure = getBeatsPerMeasure(timeSig);
+
+    // 先尝试创建 AudioContext（由用户点击触发）
+    const ctx = getMetronomeAudioContext();
+    if (!ctx) {
+        alert('当前浏览器不支持网页音频功能，节拍器无法使用。');
+        return;
+    }
+
+    // 更新显示
+    updateMetronomeDisplay();
+
+    // 重置拍数
+    currentBeat = 1;
+
+    // 更新视觉
+    updateBeatVisual(currentBeat, beatsPerMeasure);
+
+    // 播放第一拍
+    playMetronomeClick(true);
+
+    metronomeRunning = true;
+    metronomeWasUsed = true;
+    metronomeToggleBtn.textContent = '⏹ 关闭节拍器';
+    metronomeToggleBtn.className = 'btn btn-danger';
+
+    // 计算间隔（毫秒）：60000 / BPM
+    const intervalMs = 60000 / bpm;
+
+    // 清除旧的定时器（防止重复）
+    if (metronomeInterval) {
+        clearInterval(metronomeInterval);
+        metronomeInterval = null;
+    }
+
+    metronomeInterval = setInterval(() => {
+        currentBeat++;
+        if (currentBeat > beatsPerMeasure) {
+            currentBeat = 1;
+        }
+
+        const isStrong = currentBeat === 1;
+        playMetronomeClick(isStrong);
+        updateBeatVisual(currentBeat, beatsPerMeasure);
+    }, intervalMs);
+}
+
+/**
+ * 关闭节拍器
+ */
+function stopMetronome() {
+    if (metronomeInterval) {
+        clearInterval(metronomeInterval);
+        metronomeInterval = null;
+    }
+
+    metronomeRunning = false;
+    metronomeToggleBtn.textContent = '▶ 开启节拍器';
+    metronomeToggleBtn.className = 'btn btn-secondary';
+
+    // 重置视觉
+    const dots = beatIndicators.querySelectorAll('.beat-dot');
+    dots.forEach(dot => {
+        dot.classList.remove('active-strong', 'active-weak');
+    });
+    beatDisplay.textContent = '--';
+}
+
+/**
+ * 切换节拍器开启/关闭
+ */
+function toggleMetronome() {
+    if (metronomeRunning) {
+        stopMetronome();
+    } else {
+        startMetronome();
+    }
+}
+
+/**
+ * 处理节拍器自动开启/关闭（根据阶段类型和自动切换设置）
+ */
+function handleAutoMetronome() {
+    if (!metronomeAutoToggle.checked) return;
+
+    if (currentStageIndex >= stages.length) {
+        stopMetronome();
+        return;
+    }
+
+    const stage = stages[currentStageIndex];
+    if (stage.type === '练习') {
+        if (!metronomeRunning) {
+            startMetronome();
+        }
+    } else {
+        // 休息阶段关闭节拍器
+        stopMetronome();
+    }
+}
 
 // ============================================================
-// 八、事件绑定
+// 九、调试面板
+// ============================================================
+
+/** 调试面板 DOM 元素 */
+let debugPanel = null;
+let debugContent = null;
+
+/** 页面内错误列表 */
+let pageErrors = [];
+
+/**
+ * 创建调试面板（添加到页面底部）
+ */
+function createDebugPanel() {
+    // 创建调试面板容器
+    debugPanel = document.createElement('div');
+    debugPanel.id = 'debugPanel';
+    debugPanel.style.cssText = `
+        margin-top: 20px;
+        background: rgba(0, 0, 0, 0.5);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 12px;
+        padding: 0;
+        overflow: hidden;
+    `;
+
+    // 标题（可点击折叠）
+    const header = document.createElement('div');
+    header.textContent = '🔧 调试面板（点击展开/折叠）';
+    header.style.cssText = `
+        padding: 12px 16px;
+        cursor: pointer;
+        font-size: 0.9rem;
+        color: #f0c27f;
+        user-select: none;
+        background: rgba(255, 255, 255, 0.04);
+    `;
+
+    // 内容区域（默认折叠）
+    debugContent = document.createElement('div');
+    debugContent.id = 'debugContent';
+    debugContent.style.cssText = `
+        padding: 12px 16px;
+        display: none;
+        font-size: 0.8rem;
+        color: #aabbcc;
+        line-height: 1.6;
+        max-height: 500px;
+        overflow-y: auto;
+    `;
+
+    // 点击切换折叠
+    header.addEventListener('click', () => {
+        if (debugContent.style.display === 'none') {
+            debugContent.style.display = 'block';
+            updateDebugPanel();
+        } else {
+            debugContent.style.display = 'none';
+        }
+    });
+
+    debugPanel.appendChild(header);
+    debugPanel.appendChild(debugContent);
+
+    // 添加到页面底部
+    const container = document.querySelector('.container');
+    if (container) {
+        container.appendChild(debugPanel);
+    }
+}
+
+/**
+ * 更新调试面板内容
+ */
+function updateDebugPanel() {
+    if (!debugContent || debugContent.style.display === 'none') return;
+
+    const bpm = parseInt(metronomeBpm.value) || 80;
+    const timeSig = metronomeTimeSig.value;
+    const beatsPerMeasure = getBeatsPerMeasure(timeSig);
+
+    const ctxState = metronomeAudioCtx ? metronomeAudioCtx.state : '未创建';
+    const micCtxState = audioContext ? audioContext.state : '未创建';
+
+    const html = `
+        <div style="margin-bottom: 8px; font-weight: bold; color: #f0c27f;">=== 计时器状态 ===</div>
+        <div>当前阶段 index: ${currentStageIndex}</div>
+        <div>当前阶段名称: ${stages[currentStageIndex] ? stages[currentStageIndex].name : '--'}</div>
+        <div>当前剩余时间: ${remainingSeconds} 秒</div>
+        <div>当前阶段总时长: ${stages[currentStageIndex] ? stages[currentStageIndex].minutes * 60 : 0} 秒</div>
+        <div>当前模式: ${switchMode === 'auto' ? '自动模式' : '手动模式'}</div>
+        <div>timerState: ${timerState}</div>
+        <div>timerInterval 存在: ${timerInterval !== null}</div>
+        <div>阶段列表数量: ${stages.length}</div>
+        <div>下一阶段按钮存在: ${nextStageBtn !== null}</div>
+        <div>下一阶段按钮 disabled: ${nextStageBtn ? nextStageBtn.disabled : 'N/A'}</div>
+
+        <div style="margin-top: 8px; margin-bottom: 8px; font-weight: bold; color: #f0c27f;">=== 节拍器状态 ===</div>
+        <div>节拍器开启: ${metronomeRunning}</div>
+        <div>当前 BPM: ${bpm}</div>
+        <div>当前拍号: ${timeSig} (每小节 ${beatsPerMeasure} 拍)</div>
+        <div>当前拍数: ${currentBeat}</div>
+        <div>metronomeInterval 存在: ${metronomeInterval !== null}</div>
+        <div>AudioContext 存在: ${metronomeAudioCtx !== null}</div>
+        <div>AudioContext 状态: ${ctxState}</div>
+        <div>麦克风 AudioContext 状态: ${micCtxState}</div>
+        <div>最近一次节拍声音播放成功: ${lastMetronomePlaySuccess}</div>
+        <div>最近一次节拍错误: ${lastMetronomeError || '无'}</div>
+
+        <div style="margin-top: 8px; margin-bottom: 8px; font-weight: bold; color: #f0c27f;">=== 页面错误 ===</div>
+        <div>${pageErrors.length === 0 ? '暂无错误' : pageErrors.map((err, i) => `<div>${i + 1}. ${err}</div>`).join('')}</div>
+
+        <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+            <button id="debugTestNextStage" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;">测试下一阶段逻辑</button>
+            <button id="debugTestMetronome" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.8rem;">测试节拍声音</button>
+        </div>
+    `;
+
+    debugContent.innerHTML = html;
+
+    // 绑定调试按钮事件
+    const testNextBtn = document.getElementById('debugTestNextStage');
+    const testMetBtn = document.getElementById('debugTestMetronome');
+
+    if (testNextBtn) {
+        testNextBtn.addEventListener('click', () => {
+            goToNextStage();
+            // 在调试面板显示结果
+            const resultDiv = document.createElement('div');
+            resultDiv.style.cssText = 'margin-top: 4px; color: #27ae60; font-weight: bold;';
+            resultDiv.textContent = `已调用 goToNextStage() → currentStageIndex=${currentStageIndex}, remainingTime=${remainingSeconds}, timerState=${timerState}`;
+            debugContent.appendChild(resultDiv);
+        });
+    }
+
+    if (testMetBtn) {
+        testMetBtn.addEventListener('click', () => {
+            playMetronomeClick(true);
+            const ctx = metronomeAudioCtx;
+            const state = ctx ? ctx.state : '未创建';
+            const resultDiv = document.createElement('div');
+            resultDiv.style.cssText = 'margin-top: 4px; color: #27ae60; font-weight: bold;';
+            resultDiv.textContent = `已尝试播放测试节拍声音 → AudioContext 状态: ${state}, 播放成功: ${lastMetronomePlaySuccess}`;
+            if (lastMetronomeError) {
+                resultDiv.textContent += `, 错误: ${lastMetronomeError}`;
+            }
+            debugContent.appendChild(resultDiv);
+        });
+    }
+}
+
+// ============================================================
+// 十、页面内错误捕获
+// ============================================================
+
+/**
+ * 全局错误捕获
+ */
+window.onerror = function (message, source, lineno, colno, error) {
+    const errMsg = `${message} (${source}:${lineno}:${colno})`;
+    pageErrors.push(errMsg);
+    if (pageErrors.length > 20) pageErrors.shift();
+    updateDebugPanel();
+    return false;
+};
+
+/**
+ * 未处理的 Promise 错误捕获
+ */
+window.addEventListener('unhandledrejection', function (event) {
+    const errMsg = `Promise 错误: ${event.reason ? event.reason.message || event.reason : '未知错误'}`;
+    pageErrors.push(errMsg);
+    if (pageErrors.length > 20) pageErrors.shift();
+    updateDebugPanel();
+    event.preventDefault();
+});
+
+// ============================================================
+// 十一、事件绑定
 // ============================================================
 
 // 添加阶段
@@ -1046,6 +1594,7 @@ stageNameInput.addEventListener('keydown', (e) => {
 startBtn.addEventListener('click', startTimer);
 pauseBtn.addEventListener('click', pauseTimer);
 resetBtn.addEventListener('click', resetTimer);
+nextStageBtn.addEventListener('click', goToNextStage);
 
 // 切换模式选择
 switchModeRadios.forEach(radio => {
@@ -1067,6 +1616,38 @@ endBtn.addEventListener('click', endPractice);
 
 // 麦克风
 micBtn.addEventListener('click', toggleMic);
+calibrateBtn.addEventListener('click', calibrateBackgroundNoise);
+
+// 节拍器
+metronomeToggleBtn.addEventListener('click', toggleMetronome);
+
+// 测试节拍声音按钮
+const testMetronomeBtn = document.getElementById('testMetronomeBtn');
+if (testMetronomeBtn) {
+    testMetronomeBtn.addEventListener('click', function() {
+        playMetronomeClick(true);
+        const ctx = metronomeAudioCtx;
+        const state = ctx ? ctx.state : '未创建';
+        if (lastMetronomePlaySuccess) {
+            alert('✅ 节拍声音测试成功！AudioContext 状态: ' + state);
+        } else {
+            alert('❌ 节拍声音测试失败。' + (lastMetronomeError || '请查看调试面板获取详细信息。'));
+        }
+    });
+}
+metronomeBpm.addEventListener('change', () => {
+    if (metronomeRunning) {
+        stopMetronome();
+        startMetronome();
+    }
+    updateMetronomeDisplay();
+});
+metronomeTimeSig.addEventListener('change', () => {
+    if (metronomeRunning) {
+        stopMetronome();
+        startMetronome();
+    }
+});
 
 // 总结弹窗
 restartBtn.addEventListener('click', restartFromSummary);
@@ -1080,8 +1661,11 @@ summaryModal.addEventListener('click', (e) => {
 });
 
 // ============================================================
-// 九、初始化
+// 十二、初始化
 // ============================================================
+
+// 创建调试面板
+createDebugPanel();
 
 // 添加示例阶段
 stages.push({ name: '音阶练习', minutes: 5, type: '练习' });
@@ -1096,3 +1680,5 @@ remainingSeconds = stages[0].minutes * 60;
 renderStageList();
 updateDisplay();
 updateButtonStates();
+
+
