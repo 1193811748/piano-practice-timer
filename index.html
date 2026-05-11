@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>个性化练琴计时器与专注度检测</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 页面标题 -->
+        <header>
+            <h1>🎵 练琴计时器</h1>
+            <p class="subtitle">个性化练习计划 & 专注度检测</p>
+        </header>
+
+        <!-- 首次使用提示 -->
+        <section class="welcome-tips">
+            <h2>👋 首次使用？看这里</h2>
+            <ul class="tips-list">
+                <li>先在下方的"添加练习阶段"中设置你的练习计划，然后点击"开始练习"启动计时器</li>
+                <li>如果要使用专注度检测，请点击"开启麦克风检测"，浏览器会询问是否允许使用麦克风，请点击"允许"</li>
+                <li>如果不允许麦克风权限，计时器仍然可以正常使用，只是专注度检测不能工作</li>
+                <li>建议在安静环境下使用，检测结果会更稳定</li>
+            </ul>
+        </section>
+
+        <!-- 添加阶段表单 -->
+        <section class="add-stage">
+            <h2>📝 添加练习阶段</h2>
+            <div class="form-row">
+                <input type="text" id="stageName" placeholder="阶段名称（如：音阶练习）" maxlength="20">
+                <input type="number" id="stageMinutes" placeholder="分钟数" min="1" max="999" value="5">
+                <select id="stageType">
+                    <option value="练习">🎯 练习</option>
+                    <option value="休息">☕ 休息</option>
+                </select>
+                <button id="addBtn" class="btn btn-primary">➕ 添加阶段</button>
+            </div>
+        </section>
+
+
+        <!-- 计时器区域 -->
+        <section class="timer-section">
+            <h2>⏱️ 计时器</h2>
+
+            <!-- 阶段切换模式选择 -->
+            <div class="switch-mode">
+                <span class="switch-label">阶段切换模式：</span>
+                <label class="switch-option">
+                    <input type="radio" name="switchMode" value="auto" checked>
+                    <span>🔄 自动切换</span>
+                </label>
+                <label class="switch-option">
+                    <input type="radio" name="switchMode" value="manual">
+                    <span>👆 手动切换</span>
+                </label>
+            </div>
+
+            <div class="timer-display">
+                <!-- 当前阶段信息 -->
+                <div class="stage-info">
+                    <span id="currentStageName">--</span>
+                    <span class="stage-badge" id="currentStageType">--</span>
+                </div>
+                <!-- 进度信息 -->
+                <div class="progress-info">
+                    <span id="currentIndex">0</span> / <span id="totalStages">0</span>
+                </div>
+                <!-- 倒计时显示 -->
+                <div class="countdown" id="countdown">00:00</div>
+                <!-- 控制按钮 -->
+                <div class="controls">
+                    <button id="startBtn" class="btn btn-success">▶ 开始练习</button>
+
+                    <button id="pauseBtn" class="btn btn-warning" disabled>⏸ 暂停</button>
+                    <button id="resetBtn" class="btn btn-danger" disabled>⏹ 重置</button>
+                </div>
+                <!-- 手动切换模式按钮（默认隐藏） -->
+                <div id="manualControls" class="manual-controls" style="display: none;">
+                    <p class="manual-hint">当前阶段已完成，请选择操作：</p>
+                    <div class="manual-buttons">
+                        <button id="nextManualBtn" class="btn btn-success">➡️ 进入下一阶段</button>
+                        <button id="retryBtn" class="btn btn-warning">🔁 再练一次当前阶段</button>
+                        <button id="endBtn" class="btn btn-danger">⏹ 结束练习</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- 专注度检测区域 -->
+        <section class="focus-section">
+            <h2>🎤 专注度检测</h2>
+
+            <!-- 检测模式选择 -->
+            <div class="focus-mode-select">
+                <span class="switch-label">检测模式：</span>
+                <label class="switch-option">
+                    <input type="radio" name="focusMode" value="simple" id="modeSimple">
+                    <span>🔊 简单音量检测</span>
+                </label>
+                <label class="switch-option">
+                    <input type="radio" name="focusMode" value="piano" id="modePiano" checked>
+                    <span>🎹 钢琴频段检测</span>
+                </label>
+            </div>
+
+            <!-- 麦克风控制 -->
+            <div class="focus-controls">
+                <button id="micBtn" class="btn btn-secondary">🎙️ 开启麦克风检测</button>
+                <span class="mic-status" id="micStatus">已关闭</span>
+            </div>
+
+            <!-- 音量可视化 -->
+            <div class="volume-bar-container">
+                <div class="volume-bar" id="volumeBar"></div>
+            </div>
+
+            <!-- 实时检测数据 -->
+            <div class="focus-data-grid">
+                <div class="focus-data-item">
+                    <span class="focus-data-label">当前音量</span>
+                    <span class="focus-data-value" id="focusDb">-- dB</span>
+                </div>
+                <div class="focus-data-item">
+                    <span class="focus-data-label">钢琴频段占比</span>
+                    <span class="focus-data-value" id="focusPianoRatio">--%</span>
+                </div>
+                <div class="focus-data-item">
+                    <span class="focus-data-label">检测模式</span>
+                    <span class="focus-data-value" id="focusModeLabel">钢琴频段</span>
+                </div>
+                <div class="focus-data-item">
+                    <span class="focus-data-label">未检测时间</span>
+                    <span class="focus-data-value" id="focusIdleTime">0 秒</span>
+                </div>
+                <div class="focus-data-item">
+                    <span class="focus-data-label">专注提醒次数</span>
+                    <span class="focus-data-value" id="focusReminderDisplay">0</span>
+                </div>
+            </div>
+
+            <!-- 专注度状态 -->
+            <div class="focus-status" id="focusStatus">等待开始检测...</div>
+
+            <!-- 高级检测设置（可折叠） -->
+            <details class="advanced-settings" id="advancedSettings">
+                <summary>⚙️ 高级检测设置</summary>
+                <div class="settings-grid">
+                    <div class="setting-item">
+                        <label>音量阈值（dB）</label>
+                        <input type="number" id="settingVolumeThreshold" value="-45" min="-80" max="0" step="1">
+                    </div>
+                    <div class="setting-item">
+                        <label>钢琴频率下限（Hz）</label>
+                        <input type="number" id="settingFreqLow" value="80" min="20" max="2000" step="1">
+                    </div>
+                    <div class="setting-item">
+                        <label>钢琴频率上限（Hz）</label>
+                        <input type="number" id="settingFreqHigh" value="4200" min="200" max="8000" step="1">
+                    </div>
+                    <div class="setting-item">
+                        <label>频段能量占比阈值（%）</label>
+                        <input type="number" id="settingRatioThreshold" value="45" min="10" max="90" step="1">
+                    </div>
+                    <div class="setting-item">
+                        <label>静音提醒时间（秒）</label>
+                        <input type="number" id="settingSilentTimeout" value="20" min="5" max="120" step="1">
+                    </div>
+                </div>
+            </details>
+
+            <!-- 说明文字 -->
+            <p class="focus-disclaimer">
+                ⚠️ 本功能基于音量阈值和频谱能量分布进行判断，可减少部分环境噪音误判，但不等同于专业钢琴声音识别模型。实际结果可能受麦克风质量、环境噪音和设备差异影响。
+            </p>
+        </section>
+
+
+        <!-- 阶段列表 -->
+        <section class="stage-list-section">
+            <h2>📋 阶段列表</h2>
+            <ul id="stageList" class="stage-list"></ul>
+        </section>
+    </div>
+
+    <!-- 练习完成总结弹窗 -->
+    <div id="summaryModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <h2>🎉 练习完成！</h2>
+            <div class="summary-stats">
+                <div class="summary-item">
+                    <span class="summary-icon">⏱️</span>
+                    <span class="summary-label">总练习时长</span>
+                    <span class="summary-value" id="summaryTotalTime">0 分钟</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-icon">📋</span>
+                    <span class="summary-label">完成阶段数</span>
+                    <span class="summary-value" id="summaryStageCount">0</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-icon">🎤</span>
+                    <span class="summary-label">专注提醒次数</span>
+                    <span class="summary-value" id="summaryFocusCount">0</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-icon">🏆</span>
+                    <span class="summary-label">完成状态</span>
+                    <span class="summary-value" id="summaryStatus">全部完成</span>
+                </div>
+            </div>
+            <div class="modal-buttons">
+                <button id="restartBtn" class="btn btn-success">🔄 重新开始</button>
+                <button id="closeModalBtn" class="btn btn-secondary">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
