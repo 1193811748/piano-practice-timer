@@ -40,6 +40,57 @@ header h1 {
     color: #8899aa;
 }
 
+/* ===== 调律拍频计算器入口 ===== */
+.tuning-entry {
+    background: rgba(201, 160, 58, 0.08);
+    border: 1px solid rgba(201, 160, 58, 0.25);
+    border-radius: 16px;
+    padding: 0;
+    margin-bottom: 20px;
+    transition: all 0.2s;
+}
+.tuning-entry:hover {
+    background: rgba(201, 160, 58, 0.14);
+    border-color: rgba(201, 160, 58, 0.4);
+}
+.tuning-entry-link {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 18px 20px;
+    text-decoration: none;
+    color: inherit;
+}
+.tuning-entry-icon {
+    font-size: 2rem;
+    flex-shrink: 0;
+}
+.tuning-entry-text {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.tuning-entry-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #c9a03a;
+}
+.tuning-entry-desc {
+    font-size: 0.8rem;
+    color: #8899aa;
+    line-height: 1.4;
+}
+.tuning-entry-arrow {
+    font-size: 1.2rem;
+    color: #c9a03a;
+    flex-shrink: 0;
+    transition: transform 0.2s;
+}
+.tuning-entry:hover .tuning-entry-arrow {
+    transform: translateX(4px);
+}
+
 /* ===== 首次使用提示 ===== */
 .welcome-tips {
     background: rgba(240, 194, 127, 0.08);
