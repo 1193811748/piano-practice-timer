@@ -1681,4 +1681,446 @@ renderStageList();
 updateDisplay();
 updateButtonStates();
 
+// ============================================================
+// 调律日志模块
+// ============================================================
+(function() {
+    'use strict';
+
+    // ===== 常量 =====
+    const STORAGE_KEY = 'piano_tuner_logs';
+    const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
+
+    // ===== 状态 =====
+    let logs = [];
+    let selectedDate = '';       // YYYY-MM-DD
+    let calendarYear = 0;
+    let calendarMonth = 0;       // 0-11
+    let editingId = null;        // 正在编辑的日志 id
+
+    // ===== DOM 元素 =====
+    const calendarDaysEl = document.getElementById('calendarDays');
+    const calendarMonthYearEl = document.getElementById('calendarMonthYear');
+    const prevMonthBtn = document.getElementById('prevMonthBtn');
+    const nextMonthBtn = document.getElementById('nextMonthBtn');
+    const selectedDateTitleEl = document.getElementById('selectedDateTitle');
+    const logEntriesEl = document.getElementById('logEntries');
+    const logDateInput = document.getElementById('logDate');
+    const logTitleInput = document.getElementById('logTitle');
+    const logCategorySelect = document.getElementById('logCategory');
+    const logContentTextarea = document.getElementById('logContent');
+    const saveLogBtn = document.getElementById('saveLogBtn');
+    const cancelEditBtn = document.getElementById('cancelEditBtn');
+    const formTitleEl = document.getElementById('formTitle');
+
+    // ===== 工具函数 =====
+    function formatDate(dateStr) {
+        const d = new Date(dateStr + 'T00:00:00');
+        return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+    }
+
+    function getTodayStr() {
+        const d = new Date();
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    }
+
+    function getDateFromStr(dateStr) {
+        const parts = dateStr.split('-');
+        return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    }
+
+    function getLogDatesSet() {
+        const set = new Set();
+        logs.forEach(log => set.add(log.date));
+        return set;
+    }
+
+    function getLogsByDate(dateStr) {
+        return logs.filter(log => log.date === dateStr)
+            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    }
+
+    // ===== 数据管理 =====
+    function loadLogs() {
+        try {
+            const data = localStorage.getItem(STORAGE_KEY);
+            logs = data ? JSON.parse(data) : [];
+        } catch (e) {
+            console.warn('读取调律日志失败:', e);
+            logs = [];
+        }
+    }
+
+    function saveLogs() {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(logs));
+        } catch (e) {
+            console.warn('保存调律日志失败:', e);
+            alert('保存失败，请检查浏览器存储空间是否已满。');
+        }
+    }
+
+    // ===== 日历渲染 =====
+    function renderCalendar() {
+        const year = calendarYear;
+        const month = calendarMonth;
+        const todayStr = getTodayStr();
+        const logDatesSet = getLogDatesSet();
+
+        // 更新月份标题
+        calendarMonthYearEl.textContent = `${year}年${month + 1}月`;
+
+        // 当月第一天是星期几
+        const firstDay = new Date(year, month, 1).getDay();
+        // 当月总天数
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        // 上个月总天数
+        const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+        let html = '';
+
+        // 填充上个月末尾几天
+        for (let i = firstDay - 1; i >= 0; i--) {
+            const day = daysInPrevMonth - i;
+            html += `<div class="calendar-day other-month empty">${day}</div>`;
+        }
+
+        // 填充当月天数
+        for (let day = 1; day <= daysInMonth; day++) {
+            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            let classes = 'calendar-day';
+            if (dateStr === todayStr) classes += ' today';
+            if (dateStr === selectedDate) classes += ' selected';
+            if (logDatesSet.has(dateStr)) classes += ' has-log';
+            html += `<div class="${classes}" data-date="${dateStr}">${day}</div>`;
+        }
+
+        // 填充下个月开头几天（补齐 6 行共 42 格）
+        const totalCells = firstDay + daysInMonth;
+        const remaining = Math.ceil(totalCells / 7) * 7 - totalCells;
+        for (let day = 1; day <= remaining; day++) {
+            html += `<div class="calendar-day other-month empty">${day}</div>`;
+        }
+
+        calendarDaysEl.innerHTML = html;
+
+        // 绑定日期点击事件
+        calendarDaysEl.querySelectorAll('.calendar-day:not(.empty)').forEach(el => {
+            el.addEventListener('click', function() {
+                const date = this.dataset.date;
+                if (date) {
+                    selectDate(date);
+                }
+            });
+        });
+    }
+
+    // ===== 选择日期 =====
+    function selectDate(dateStr) {
+        selectedDate = dateStr;
+        renderCalendar();
+        renderLogList();
+        // 更新表单日期
+        logDateInput.value = dateStr;
+    }
+
+    // ===== 日志列表渲染 =====
+    function renderLogList() {
+        if (!selectedDate) return;
+
+        selectedDateTitleEl.textContent = formatDate(selectedDate);
+        const dayLogs = getLogsByDate(selectedDate);
+
+        if (dayLogs.length === 0) {
+            logEntriesEl.innerHTML = '<p class="empty-hint">这一天还没有调律日志。</p>';
+            return;
+        }
+
+        let html = '';
+        dayLogs.forEach(log => {
+            const summary = log.content.length > 80
+                ? log.content.substring(0, 80) + '...'
+                : log.content;
+            const createdDate = new Date(log.createdAt);
+            const timeStr = `${String(createdDate.getHours()).padStart(2, '0')}:${String(createdDate.getMinutes()).padStart(2, '0')}`;
+
+            html += `
+                <div class="log-entry" data-id="${log.id}">
+                    <div class="log-entry-header">
+                        <span class="log-entry-title">${escapeHtml(log.title)}</span>
+                        <span class="log-entry-category" data-category="${log.category}">${log.category}</span>
+                    </div>
+                    <div class="log-entry-date">${log.date} ${timeStr}</div>
+                    <div class="log-entry-summary">${escapeHtml(summary)}</div>
+                    <div class="log-entry-actions">
+                        <button class="btn btn-secondary edit-log-btn">✏️ 编辑</button>
+                        <button class="btn btn-danger delete-log-btn">🗑️ 删除</button>
+                    </div>
+                </div>
+            `;
+        });
+
+        logEntriesEl.innerHTML = html;
+
+        // 绑定点击查看详情
+        logEntriesEl.querySelectorAll('.log-entry').forEach(el => {
+            el.addEventListener('click', function(e) {
+                // 如果点击的是按钮，不触发详情弹窗
+                if (e.target.closest('.log-entry-actions')) return;
+                const id = this.dataset.id;
+                showLogDetail(id);
+            });
+        });
+
+        // 绑定编辑按钮
+        logEntriesEl.querySelectorAll('.edit-log-btn').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const entry = this.closest('.log-entry');
+                const id = entry.dataset.id;
+                startEditLog(id);
+            });
+        });
+
+        // 绑定删除按钮
+        logEntriesEl.querySelectorAll('.delete-log-btn').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const entry = this.closest('.log-entry');
+                const id = entry.dataset.id;
+                deleteLog(id);
+            });
+        });
+    }
+
+    // ===== HTML 转义 =====
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // ===== 查看日志详情（弹窗） =====
+    function showLogDetail(id) {
+        const log = logs.find(l => l.id === id);
+        if (!log) return;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'log-detail-overlay';
+        overlay.addEventListener('click', function(e) {
+            if (e.target === this) closeDetail();
+        });
+
+        const createdDate = new Date(log.createdAt);
+        const dateTimeStr = `${log.date} ${String(createdDate.getHours()).padStart(2, '0')}:${String(createdDate.getMinutes()).padStart(2, '0')}`;
+
+        overlay.innerHTML = `
+            <div class="log-detail-content">
+                <h2>${escapeHtml(log.title)}</h2>
+                <div class="log-detail-meta">
+                    <span class="log-detail-date">${dateTimeStr}</span>
+                    <span class="log-detail-category">${log.category}</span>
+                </div>
+                <div class="log-detail-body">${escapeHtml(log.content)}</div>
+                <div class="log-detail-close">
+                    <button class="btn btn-secondary close-detail-btn">关闭</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        // 绑定关闭按钮
+        overlay.querySelector('.close-detail-btn').addEventListener('click', closeDetail);
+
+        // ESC 键关闭
+        function onKeyDown(e) {
+            if (e.key === 'Escape') closeDetail();
+        }
+        document.addEventListener('keydown', onKeyDown);
+
+        function closeDetail() {
+            document.removeEventListener('keydown', onKeyDown);
+            if (overlay.parentNode) {
+                overlay.parentNode.removeChild(overlay);
+            }
+        }
+    }
+
+    // ===== 表单校验 =====
+    function validateForm() {
+        if (!logDateInput.value) {
+            alert('请选择日期');
+            logDateInput.focus();
+            return false;
+        }
+        if (!logTitleInput.value.trim()) {
+            alert('请输入日志标题');
+            logTitleInput.focus();
+            return false;
+        }
+        if (!logCategorySelect.value) {
+            alert('请选择分类');
+            logCategorySelect.focus();
+            return false;
+        }
+        if (!logContentTextarea.value.trim()) {
+            alert('请输入心得正文');
+            logContentTextarea.focus();
+            return false;
+        }
+        return true;
+    }
+
+    // ===== 保存日志（新增/编辑） =====
+    function saveLog() {
+        if (!validateForm()) return;
+
+        const date = logDateInput.value;
+        const title = logTitleInput.value.trim();
+        const category = logCategorySelect.value;
+        const content = logContentTextarea.value.trim();
+
+        if (editingId) {
+            // 编辑模式：更新已有日志
+            const index = logs.findIndex(l => l.id === editingId);
+            if (index !== -1) {
+                logs[index].date = date;
+                logs[index].title = title;
+                logs[index].category = category;
+                logs[index].content = content;
+                // 更新 createdAt 为当前时间
+                logs[index].createdAt = new Date().toISOString();
+            }
+            editingId = null;
+        } else {
+            // 新增模式
+            const newLog = {
+                id: Date.now().toString(),
+                date: date,
+                title: title,
+                category: category,
+                content: content,
+                createdAt: new Date().toISOString()
+            };
+            logs.push(newLog);
+        }
+
+        saveLogs();
+        resetForm();
+        renderCalendar();
+        renderLogList();
+    }
+
+    // ===== 开始编辑 =====
+    function startEditLog(id) {
+        const log = logs.find(l => l.id === id);
+        if (!log) return;
+
+        editingId = id;
+        logDateInput.value = log.date;
+        logTitleInput.value = log.title;
+        logCategorySelect.value = log.category;
+        logContentTextarea.value = log.content;
+
+        formTitleEl.textContent = '✏️ 编辑日志';
+        saveLogBtn.textContent = '💾 更新日志';
+        cancelEditBtn.style.display = 'block';
+
+        // 滚动到表单区域
+        document.querySelector('.log-form-section').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    // ===== 取消编辑 =====
+    function cancelEdit() {
+        resetForm();
+    }
+
+    // ===== 重置表单 =====
+    function resetForm() {
+        editingId = null;
+        logDateInput.value = selectedDate || getTodayStr();
+        logTitleInput.value = '';
+        logCategorySelect.value = '调律练习';
+        logContentTextarea.value = '';
+
+        formTitleEl.textContent = '📄 新增日志';
+        saveLogBtn.textContent = '💾 保存日志';
+        cancelEditBtn.style.display = 'none';
+    }
+
+    // ===== 删除日志 =====
+    function deleteLog(id) {
+        const log = logs.find(l => l.id === id);
+        if (!log) return;
+
+        const confirmed = confirm(`确定要删除「${log.title}」这条日志吗？`);
+        if (!confirmed) return;
+
+        logs = logs.filter(l => l.id !== id);
+        saveLogs();
+
+        // 如果删除的是正在编辑的日志，退出编辑状态
+        if (editingId === id) {
+            resetForm();
+        }
+
+        renderCalendar();
+        renderLogList();
+    }
+
+    // ===== 月份切换 =====
+    function goToPrevMonth() {
+        calendarMonth--;
+        if (calendarMonth < 0) {
+            calendarMonth = 11;
+            calendarYear--;
+        }
+        renderCalendar();
+    }
+
+    function goToNextMonth() {
+        calendarMonth++;
+        if (calendarMonth > 11) {
+            calendarMonth = 0;
+            calendarYear++;
+        }
+        renderCalendar();
+    }
+
+    // ===== 初始化 =====
+    function init() {
+        // 加载数据
+        loadLogs();
+
+        // 设置初始日期
+        const today = getTodayStr();
+        selectedDate = today;
+
+        // 设置日历为当前月份
+        const now = new Date();
+        calendarYear = now.getFullYear();
+        calendarMonth = now.getMonth();
+
+        // 表单默认日期
+        logDateInput.value = today;
+
+        // 渲染
+        renderCalendar();
+        renderLogList();
+
+        // 绑定事件
+        prevMonthBtn.addEventListener('click', goToPrevMonth);
+        nextMonthBtn.addEventListener('click', goToNextMonth);
+        saveLogBtn.addEventListener('click', saveLog);
+        cancelEditBtn.addEventListener('click', cancelEdit);
+    }
+
+    // 启动
+    init();
+})();
+
 

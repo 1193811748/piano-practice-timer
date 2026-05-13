@@ -261,6 +261,73 @@
             </div>
         </section>
 
+        <!-- ===== 调律日志模块 ===== -->
+        <section class="tuning-log-section">
+            <h2>📝 调律日志</h2>
+            <p class="section-desc">记录每次调律练习、维修实操和理论学习心得。</p>
+
+            <div class="tuning-log-layout">
+                <!-- 左侧：日历 -->
+                <div class="log-calendar">
+                    <div class="calendar-header">
+                        <button id="prevMonthBtn" class="btn btn-small" title="上个月">◀</button>
+                        <span id="calendarMonthYear" class="calendar-month-year"></span>
+                        <button id="nextMonthBtn" class="btn btn-small" title="下个月">▶</button>
+                    </div>
+                    <div class="calendar-weekdays">
+                        <span>日</span>
+                        <span>一</span>
+                        <span>二</span>
+                        <span>三</span>
+                        <span>四</span>
+                        <span>五</span>
+                        <span>六</span>
+                    </div>
+                    <div class="calendar-days" id="calendarDays"></div>
+                </div>
+
+                <!-- 中间：日志列表 -->
+                <div class="log-list-section">
+                    <h3 class="log-list-title" id="selectedDateTitle">今天</h3>
+                    <div class="log-entries" id="logEntries">
+                        <p class="empty-hint">这一天还没有调律日志。</p>
+                    </div>
+                </div>
+
+                <!-- 右侧：表单 -->
+                <div class="log-form-section">
+                    <h3 class="log-form-title" id="formTitle">📄 新增日志</h3>
+                    <form id="logForm" class="log-form" onsubmit="return false;">
+                        <div class="log-form-group">
+                            <label for="logDate">日期</label>
+                            <input type="date" id="logDate">
+                        </div>
+                        <div class="log-form-group">
+                            <label for="logTitle">标题</label>
+                            <input type="text" id="logTitle" placeholder="输入日志标题" maxlength="100">
+                        </div>
+                        <div class="log-form-group">
+                            <label for="logCategory">分类</label>
+                            <select id="logCategory">
+                                <option value="调律练习">🎯 调律练习</option>
+                                <option value="维修实操">🔧 维修实操</option>
+                                <option value="理论学习">📖 理论学习</option>
+                                <option value="练琴">🎹 练琴</option>
+                            </select>
+                        </div>
+                        <div class="log-form-group">
+                            <label for="logContent">心得正文</label>
+                            <textarea id="logContent" placeholder="记录调律心得、问题、方法、反思或练习总结..." rows="5"></textarea>
+                        </div>
+                        <div class="log-form-buttons">
+                            <button type="button" id="saveLogBtn" class="btn btn-gold">💾 保存日志</button>
+                            <button type="button" id="cancelEditBtn" class="btn btn-secondary" style="display:none;">取消编辑</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+
 
         <!-- 阶段列表 -->
         <section class="stage-list-section">
